@@ -36,9 +36,9 @@ async def analyze_system_logs(
         results["message"] = "Searching for authentication failures."
     elif log_type == "web":
         # Common paths for Apache/Nginx access logs
-        log_paths = ["/var/log/httpd/access.log", "/var/log/apache2/access.log", "/var/log/nginx/access.log"]
+        log_paths = ["/var/log/httpd/access.log"]
         # Pattern to capture IP and 4xx/5xx status codes
-        patterns = [re.compile(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).?"(?:GET|POST|HEAD|PUT|DELETE|OPTIONS).?"\s([45]\d{2})\s')]
+        patterns = [re.compile(r'^(\d{1,3}(?:\.\d{1,3}){3}) - - \[.*?\] "(?:GET|POST|HEAD|PUT|DELETE|OPTIONS) [^"]+" ([45]\d{2})')]
         results["message"] = "Searching for web page errors."
     elif log_type == "mail":
         # Common paths for mail logs
@@ -142,7 +142,7 @@ async def analyze_system_logs(
                 log_event(ALARMS_LOG_FILE, "WEB_SCAN_DETECTED", summary_msg, ip=ip)
                 send_alert_email("HIPS Alert: Web Scan Detected", summary_msg)
                 if re.match(r'\d{1,3}(\.\d{1,3}){3}', ip):
-                    await block_ip(source, reason="Web scan/bruteforce detected")
+                    await block_ip(ip, reason="Web scan/bruteforce detected")
         if ip_summary:
             results["detections"].insert(0, {"summary": ip_summary, "type": "web_ip_summary"})
     
