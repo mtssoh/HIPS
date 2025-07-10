@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HIPS - Host-based Intrusion Prevention System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .dashboard-card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+        }
+        .status-ok {
+            color: #28a745;
+        }
+        .status-alert {
+            color: #dc3545;
+        }
+        .status-warning {
+            color: #ffc107;
+        }
+        .navbar-brand {
+            font-weight: bold;
+            color: #007bff !important;
+        }
+        .spinner-border-sm {
+            width: 1rem;
+            height: 1rem;
+        }
+        .result-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .json-display {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 0.9em;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .login-container {
+            max-width: 400px;
+            margin: 50px auto;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-shield-alt"></i> HIPS Dashboard
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text me-3" id="user-display"></span>
+                <button class="btn btn-outline-light btn-sm" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Login Form -->
+    <div class="container" id="login-container">
+        <div class="login-container">
+            <div class="card dashboard-card">
+                <div class="card-body">
+                    <h4 class="card-title text-center mb-4">
+                        <i class="fas fa-lock"></i> Login to HIPS
+                    </h4>
+                    <form id="login-form">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" value="admin" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" value="adminpass" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-sign-in-alt"></i> Login
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div class="container mt-4 hidden" id="dashboard-container">
+        <!-- Status Overview -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card dashboard-card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-chart-line"></i> Sistema Overview
+                            <span class="badge bg-info ms-2" id="auto-scan-status">Escaneo automático: Activo</span>
+                            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleAutoScan()" id="toggle-auto-scan">
+                                <i class="fas fa-pause"></i> Pausar
+                            </button>
+                        </h5>
+                        <div class="text-muted mb-2" id="last-scan-time">
+                            Iniciando escaneo automático...
+                        </div>
+                        <div class="text-muted small">
+                            Próximo escaneo automático en: <span id="next-scan-countdown">5:00</span>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <i class="fas fa-file-alt fa-2x text-info mb-2"></i>
+                                    <h6>File Integrity</h6>
+                                    <span class="badge bg-success" id="file-status">OK</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <i class="fas fa-network-wired fa-2x text-warning mb-2"></i>
+                                    <h6>Network Security</h6>
+                                    <span class="badge bg-success" id="network-status">OK</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <i class="fas fa-cogs fa-2x text-primary mb-2"></i>
+                                    <h6>Process Monitor</h6>
+                                    <span class="badge bg-success" id="process-status">OK</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <i class="fas fa-shield-alt fa-2x text-danger mb-2"></i>
+                                    <h6>DDoS Protection</h6>
+                                    <span class="badge bg-success" id="ddos-status">OK</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="row mb-4">
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card dashboard-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-search fa-2x text-primary mb-3"></i>
+                        <h6>System File Scan</h6>
+                        <button class="btn btn-primary btn-sm" onclick="scanSystemFiles()">
+                            <span class="spinner-border spinner-border-sm hidden" id="scan-spinner"></span>
+                            Scan Files
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card dashboard-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-users fa-2x text-warning mb-3"></i>
+                        <h6>Connected Users</h6>
+                        <button class="btn btn-warning btn-sm" onclick="checkConnectedUsers()">
+                            <span class="spinner-border spinner-border-sm hidden" id="users-spinner"></span>
+                            Check Users
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card dashboard-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-eye fa-2x text-danger mb-3"></i>
+                        <h6>Sniffer Detection</h6>
+                        <button class="btn btn-danger btn-sm" onclick="detectSniffers()">
+                            <span class="spinner-border spinner-border-sm hidden" id="sniffers-spinner"></span>
+                            Detect Sniffers
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card dashboard-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-memory fa-2x text-info mb-3"></i>
+                        <h6>Memory Usage</h6>
+                        <button class="btn btn-info btn-sm" onclick="checkMemoryUsage()">
+                            <span class="spinner-border spinner-border-sm hidden" id="memory-spinner"></span>
+                            Check Memory
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card dashboard-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-folder-open fa-2x text-secondary mb-3"></i>
+                        <h6>TMP Directory</h6>
+                        <button class="btn btn-secondary btn-sm" onclick="checkTmpDirectory()">
+                            <span class="spinner-border spinner-border-sm hidden" id="tmp-spinner"></span>
+                            Check TMP
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card dashboard-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-clock fa-2x text-success mb-3"></i>
+                        <h6>Cron Jobs</h6>
+                        <button class="btn btn-success btn-sm" onclick="checkCronJobs()">
+                            <span class="spinner-border spinner-border-sm hidden" id="cron-spinner"></span>
+                            Check Cron
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log Analysis Section -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card dashboard-card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-file-alt"></i> Log Analysis
+                        </h5>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <button class="btn btn-outline-primary btn-sm w-100" onclick="analyzeLogs('auth')">
+                                    <i class="fas fa-user-shield"></i> Auth Logs
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button class="btn btn-outline-primary btn-sm w-100" onclick="analyzeLogs('web')">
+                                    <i class="fas fa-globe"></i> Web Logs
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button class="btn btn-outline-primary btn-sm w-100" onclick="analyzeLogs('mail')">
+                                    <i class="fas fa-envelope"></i> Mail Logs
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DDoS Analysis Section -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card dashboard-card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-shield-alt"></i> DDoS Analysis
+                        </h5>
+                        <div class="row">
+                            <div class="col-md-8">
+                                <input type="text" class="form-control" id="ddos-log-path" placeholder="Enter log file path (e.g., /var/log/ddos.log)">
+                            </div>
+                            <div class="col-md-4">
+                                <button class="btn btn-danger btn-sm w-100" onclick="analyzeDDoSLog()">
+                                    <span class="spinner-border spinner-border-sm hidden" id="ddos-spinner"></span>
+                                    Analyze DDoS Log
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="row" id="results-container">
+            <!-- Results will be displayed here -->
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

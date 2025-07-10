@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+python-dotenv
+psycopg2-binary
+passlib[bcrypt]
+python-jose
+psutil
+email-validator
