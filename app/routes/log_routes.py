@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.get("/analyze_logs")
 async def analyze_system_logs(
-    log_type: str,  # Can be 'auth', 'web', 'mail'
+    log_type: str,  
     current_user: User = Depends(get_current_user)
 ):
     results = {
@@ -27,7 +27,7 @@ async def analyze_system_logs(
     patterns = []
     
     if log_type == "auth":
-        # Paths for Debian/Kali (auth.log) and CentOS (secure, messages)
+       
         log_paths = ["/var/log/secure"] 
         patterns = [
             re.compile(r"authentication failure", re.IGNORECASE),
@@ -35,15 +35,15 @@ async def analyze_system_logs(
         ]
         results["message"] = "Searching for authentication failures."
     elif log_type == "web":
-        # Common paths for Apache/Nginx access logs
+       
         log_paths = ["/var/log/httpd/access.log"]
-        # Pattern to capture IP and 4xx/5xx status codes
+       
         patterns = [re.compile(r'^(\d{1,3}(?:\.\d{1,3}){3}) - - \[.*?\] "(?:GET|POST|HEAD|PUT|DELETE|OPTIONS) [^"]+" ([45]\d{2})')]
         results["message"] = "Searching for web page errors."
     elif log_type == "mail":
-        # Common paths for mail logs
+     
         log_paths = ["/var/log/mail.log"]
-        # Patterns for mass mail detection (can be improved)
+   
         patterns = [
                 re.compile(r"relay=.*\[(\d{1,3}(?:\.\d{1,3}){3})\].*authid=.*?@.*?, mech=LOGIN", re.IGNORECASE),
                 re.compile(r"from=<.*?@.*?>, size=\d+, class=\d+, nrcpts=\d+, msgid=<.*?>", re.IGNORECASE),
@@ -57,12 +57,12 @@ async def analyze_system_logs(
             detail="Unsupported log type. Valid types: 'auth', 'web', 'mail'."
         )
 
-    found_events = {}  # Para agrupar eventos por IP/fuente para umbrales
+    found_events = {}  
 
     for log_path in log_paths:
         if os.path.exists(log_path):
             try:
-                # Usar 'tail' para leer las últimas 1000 líneas (eficiente para logs grandes)
+               
                 proc = subprocess.run(['tail', '-n', '1000', log_path], capture_output=True, text=True, check=True)
                 lines = proc.stdout.splitlines()
 
@@ -71,8 +71,7 @@ async def analyze_system_logs(
                         match = pattern.search(line)
                         if match:
                             detection_info = {"line": line, "pattern": pattern.pattern}
-                            ip = None  # Inicializa IP para cada match
-                            
+                            ip = None  
                             if log_type == "web":
                                 if len(match.groups()) >= 2:
                                     ip = match.group(1)
@@ -84,7 +83,7 @@ async def analyze_system_logs(
                                     found_events[ip]["count"] += 1
                                     found_events[ip]["errors"].append(f"HTTP {status_code} from {ip}")
                             elif log_type == "auth":
-                                # Para autenticación, extrae la IP si está presente en el log
+                               
                                 ip_match = re.search(r'(?:from|for)\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', line)
                                 if ip_match:
                                     ip = ip_match.group(1)
@@ -96,8 +95,8 @@ async def analyze_system_logs(
                                 found_events[key]["attempts"].append(line)
                             elif log_type == "mail":
                                 if len(match.groups()) >= 1:
-                                    # Captura la IP de los patrones de mail si está en el grupo 1 o 2
-                                    if pattern == patterns[0] or pattern == patterns[1]:  # Sent/unknown client
+                                    
+                                    if pattern == patterns[0] or pattern == patterns[1]: 
                                         ip = match.group(1) if len(match.groups()) >= 1 else None
                                     elif pattern == patterns[2]:  # Reject pattern
                                         ip = match.group(2) if len(match.groups()) >= 2 else None
@@ -111,7 +110,7 @@ async def analyze_system_logs(
                             
                             results["detections"].append(detection_info)
                             log_event(ALARMS_LOG_FILE, f"LOG_PATTERN_{log_type.upper()}", line.strip(), ip=ip)
-                            break  # Una vez que un patrón coincide en la línea, pasa a la siguiente línea
+                            break  #
 
             except FileNotFoundError:
                 results["detections"].append({"error": f"Log {log_path} not found."})
@@ -125,16 +124,16 @@ async def analyze_system_logs(
         else:
             results["detections"].append({"info": f"Log file {log_path} does not exist on this system."})
 
-    # Lógica de Umbrales y Prevención basada en patrones encontrados
+   
     if results["detections"]:
         results["status"] = "ALERT"
         results["message"] = f"{log_type} patterns detected. Review required."
     
-    # Análisis y acciones para web logs (errores de página)
+
     if log_type == "web":
         ip_summary = []
         for ip, info in found_events.items():
-            if info["count"] >= 5 and ip != "N/A":  # Umbral de 5 errores HTTP para posible escaneo
+            if info["count"] >= 5 and ip != "N/A":
                 summary_msg = f"IP {ip} generated {info['count']} HTTP errors (possible web scan/bruteforce)."
                 ip_summary.append(summary_msg)
                 results["message"] = "Multiple HTTP errors from the same IP detected."
@@ -146,11 +145,11 @@ async def analyze_system_logs(
         if ip_summary:
             results["detections"].insert(0, {"summary": ip_summary, "type": "web_ip_summary"})
     
-    # Análisis y acciones para mail logs (envío masivo)
+
     elif log_type == "mail":
         mail_summary = []
         for source, info in found_events.items():
-            if info["count"] >= 10:  # Umbral de 10 eventos de mail para posible envío masivo
+            if info["count"] >= 10:  
                 summary_msg = f"Source '{source}' generated {info['count']} mail events (possible mass sending)."
                 mail_summary.append(summary_msg)
                 results["message"] = "Possible mass mail sending detected."
@@ -164,11 +163,11 @@ async def analyze_system_logs(
         if mail_summary:
             results["detections"].insert(0, {"summary": mail_summary, "type": "mail_mass_summary"})
 
-    # Análisis y acciones para autenticación logs (fallos repetitivos)
+
     elif log_type == "auth":
         auth_summary = []
         for source, info in found_events.items():
-            if info["count"] >= 5:  # Umbral de 5 fallos de autenticación
+            if info["count"] >= 5:
                 summary_msg = f"Source '{source}' generated {info['count']} authentication failures (possible bruteforce)."
                 auth_summary.append(summary_msg)
                 results["message"] = "Multiple authentication failures detected."
