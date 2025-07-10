@@ -28,7 +28,7 @@ async def analyze_system_logs(
     
     if log_type == "auth":
         # Paths for Debian/Kali (auth.log) and CentOS (secure, messages)
-        log_paths = ["/var/log/auth.log", "/var/log/secure", "/var/log/messages"] 
+        log_paths = ["/var/log/secure"] 
         patterns = [
             re.compile(r"authentication failure", re.IGNORECASE),
             re.compile(r"failed password", re.IGNORECASE)
