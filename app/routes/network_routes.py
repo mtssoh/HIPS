@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth import get_current_user
 from app.models import User
 from app.utils import send_alert_email, log_event, ALARMS_LOG_FILE
+from app.prevention import change_user_password, block_ip
 
 router = APIRouter()
 
@@ -34,19 +35,48 @@ async def get_connected_users(
                     "what": " ".join(parts[8:]) if len(parts) > 8 else "N/A"
                 }
                 connected_users.append(user_info)
-        
+
         if not connected_users:
             return {"message": "No connected users detected (besides the system itself).", "users": []}
 
-        # Lógica para detectar usuarios sospechosos
-        suspicious_users = [u for u in connected_users if u["from"] not in ["localhost", "127.0.0.1", "::1", os.getenv("KNOWN_LOCAL_IP", "")] and u["from"] != "?"]
-        if suspicious_users:
-            msg = f"Suspicious connected users detected: {', '.join([u['user'] + ' from ' + u['from'] for u in suspicious_users])}"
-            log_event(ALARMS_LOG_FILE, "SUSPICIOUS_LOGIN", msg)
-            send_alert_email("HIPS Alert: Suspicious Login Detected", msg)
-            return {"connected_users": connected_users, "user": current_user.username, "alert": "Suspicious logins found!"}
+        # Detectar usuarios sospechosos
+        known_local = {"localhost", "127.0.0.1", "::1", ":1", os.getenv("KNOWN_LOCAL_IP", "")}
+        suspicious_users = [u for u in connected_users if u["from"] not in known_local and u["from"] != "?"]
 
-        return {"connected_users": connected_users, "user": current_user.username}
+        if suspicious_users:
+            alert_list = []
+            for su in suspicious_users:
+                ip = su["from"]
+                username = su["user"]
+                # Bloquear la IP
+                try:
+                    subprocess.run(["sudo", "iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"], check=True)
+                    log_event(ALARMS_LOG_FILE, "IP_BLOCKED", f"Blocked suspicious IP: {ip} (User: {username})")
+                    send_alert_email(
+                        f"HIPS Alert: IP Blocked - {ip}",
+                        f"The IP address {ip} associated with user {username} has been blocked due to suspicious login."
+                    )
+                except subprocess.CalledProcessError as e:
+                    log_event(ALARMS_LOG_FILE, "BLOCK_FAILED", f"Failed to block IP {ip}: {e}")
+                
+                await change_user_password(username, reason=f"Suspicious login from IP {ip}")
+                alert_list.append(f"{username} from {ip}")
+
+            msg = f"Suspicious connected users detected and mitigated: {', '.join(alert_list)}"
+            log_event(ALARMS_LOG_FILE, "SUSPICIOUS_LOGIN", msg)
+            return {
+                "connected_users": connected_users,
+                "alert": msg,
+                "status": "ALERT",
+                "user": current_user.username
+            }
+
+        return {
+            "connected_users": connected_users,
+            "message": "No suspicious users found.",
+            "status": "OK",
+            "user": current_user.username
+        }
 
     except subprocess.CalledProcessError as e:
         log_event(ALARMS_LOG_FILE, "CMD_ERROR", f"Error running 'w' command: {e.stderr.strip()}")

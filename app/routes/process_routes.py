@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth import get_current_user
 from app.models import User
 from app.utils import send_alert_email, log_event, ALARMS_LOG_FILE
-
+from app.prevention import kill_process_by_pid
 router = APIRouter()
 
 @router.get("/mail_queue_size")
@@ -55,7 +55,7 @@ async def get_mail_queue_size(
 
 @router.get("/high_memory_processes")
 async def get_high_memory_processes(
-    threshold_percent: float = 10.0,  # Default to 1% of total memory
+    threshold_percent: float = 10.0,
     current_user: User = Depends(get_current_user)
 ):
     results = {
@@ -65,39 +65,44 @@ async def get_high_memory_processes(
     }
 
     try:
-        total_memory_mb = psutil.virtual_memory().total / (1024 * 1024)  # Total system memory in MB
+        total_memory_mb = psutil.virtual_memory().total / (1024 * 1024)
 
         for proc in psutil.process_iter(['pid', 'name', 'username', 'memory_info', 'cpu_percent']):
             try:
-                rss_mb = proc.memory_info().rss / (1024 * 1024)  # Resident Set Size in MB
+                rss_mb = proc.memory_info().rss / (1024 * 1024)
                 percentage = (rss_mb / total_memory_mb) * 100
 
                 if percentage > threshold_percent:
-                    cpu_percent_val = proc.cpu_percent(interval=0.01)  # Small interval for quick check
-                    
+                    cpu_percent_val = proc.cpu_percent(interval=0.01)
+
                     proc_info = {
                         "pid": proc.info['pid'],
                         "name": proc.info['name'],
                         "user": proc.info['username'],
                         "memory_percent": round(percentage, 2),
                         "memory_mb": round(rss_mb, 2),
-                        "cpu_percent": round(cpu_percent_val, 2)
+                        "cpu_percent": round(cpu_percent_val, 2),
+                        "killed": False  # agregado
                     }
-                    results["processes"].append(proc_info)
-                    
-                    if results["status"] != "ALERT":
-                        results["status"] = "ALERT"
-                        results["message"] = "Processes with high memory consumption detected!"
-                    
-                    # Log y alerta para procesos de alto consumo
+
+                    # Acción preventiva
                     alert_msg = f"High memory usage: Process '{proc_info['name']}' (PID: {proc_info['pid']}) using {proc_info['memory_percent']}% RAM."
                     log_event(ALARMS_LOG_FILE, "HIGH_MEM_PROCESS", alert_msg)
                     send_alert_email("HIPS Alert: High Memory Usage", alert_msg)
 
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass 
+                    killed = await kill_process_by_pid(proc_info["pid"], "HIGH_MEM_PROCESS")
+                    proc_info["killed"] = killed
 
-        results["processes"].sort(key=lambda x: x['memory_percent'], reverse=True) 
+                    results["processes"].append(proc_info)
+
+                    if results["status"] != "ALERT":
+                        results["status"] = "ALERT"
+                        results["message"] = "Processes with high memory consumption detected!"
+
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+
+        results["processes"].sort(key=lambda x: x['memory_percent'], reverse=True)
 
     except Exception as e:
         results["status"] = "ERROR"
@@ -173,6 +178,12 @@ async def check_tmp_directory(
                 
                 log_event(ALARMS_LOG_FILE, "TMP_SUSPICIOUS", f"Suspicious file/activity in {full_path}: {message}")
                 send_alert_email("HIPS Alert: Suspicious /tmp Activity", f"Suspicious activity detected in /tmp: {full_path}. Details: {message}")
+                
+                for proc_str in processes_using_file:
+                    match = re.search(r'PID (\d+)', proc_str)
+                    if match:
+                        pid = int(match.group(1))
+                        await kill_process_by_pid(pid, f"Suspicious /tmp file used: {entry}")
 
             else:
                 status_entry = "OK"

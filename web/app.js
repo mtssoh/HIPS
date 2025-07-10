@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.scanSystemFiles = () => fetchAndDisplay('/scan/system_files', 'scan-spinner');
     window.checkConnectedUsers = () => fetchAndDisplay('/system/connected_users', 'users-spinner');
     window.detectSniffers = () => fetchAndDisplay('/system/detect_sniffers', 'sniffers-spinner');
-    window.checkMemoryUsage = () => fetchAndDisplay('/system/high_memory_processes?threshold_percent=10.0', 'memory-spinner');
+    window.checkMemoryUsage = () => fetchAndDisplay('/system/high_memory_processes?threshold_percent=6.0', 'memory-spinner');
     window.checkTmpDirectory = () => fetchAndDisplay('/system/check_tmp', 'tmp-spinner');
     window.checkCronJobs = () => fetchAndDisplay('/system/check_cron_jobs', 'cron-spinner');
 

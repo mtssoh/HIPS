@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth import get_current_user
 from app.models import User
 from app.utils import send_alert_email, log_event, ALARMS_LOG_FILE
+from app.prevention import block_ip, change_user_password
 
 router = APIRouter()
 
@@ -41,13 +42,14 @@ async def analyze_system_logs(
         results["message"] = "Searching for web page errors."
     elif log_type == "mail":
         # Common paths for mail logs
-        log_paths = ["/var/log/maillog", "/var/log/mail.log"]
+        log_paths = ["/var/log/mail.log"]
         # Patterns for mass mail detection (can be improved)
         patterns = [
-            re.compile(r"client=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*?status=sent", re.IGNORECASE), # Sent mails
-            re.compile(r"client=unknown.*?[from|to]=<.+@.+>", re.IGNORECASE), # Unknown clients sending mail
-            re.compile(r"reject: RCPT from (\S+)\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]", re.IGNORECASE) # Mail rejections with IP
-        ]
+                re.compile(r"relay=.*\[(\d{1,3}(?:\.\d{1,3}){3})\].*authid=.*?@.*?, mech=LOGIN", re.IGNORECASE),
+                re.compile(r"from=<.*?@.*?>, size=\d+, class=\d+, nrcpts=\d+, msgid=<.*?>", re.IGNORECASE),
+                re.compile(r"stat=User unknown", re.IGNORECASE)
+                ]
+
         results["message"] = "Searching for suspicious mail activity."
     else:
         raise HTTPException(
@@ -139,6 +141,8 @@ async def analyze_system_logs(
                 results["status"] = "ALERT"
                 log_event(ALARMS_LOG_FILE, "WEB_SCAN_DETECTED", summary_msg, ip=ip)
                 send_alert_email("HIPS Alert: Web Scan Detected", summary_msg)
+                if re.match(r'\d{1,3}(\.\d{1,3}){3}', ip):
+                    await block_ip(source, reason="Web scan/bruteforce detected")
         if ip_summary:
             results["detections"].insert(0, {"summary": ip_summary, "type": "web_ip_summary"})
     
@@ -153,6 +157,10 @@ async def analyze_system_logs(
                 results["status"] = "ALERT"
                 log_event(ALARMS_LOG_FILE, "MASS_MAIL_DETECTED", summary_msg, ip=source if re.match(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', source) else None)
                 send_alert_email("HIPS Alert: Mass Mail Sending Detected", summary_msg)
+                if re.match(r'\d{1,3}(\.\d{1,3}){3}', source):
+                    await block_ip(source, reason="Mass mail activity detected")
+
+
         if mail_summary:
             results["detections"].insert(0, {"summary": mail_summary, "type": "mail_mass_summary"})
 
@@ -166,7 +174,14 @@ async def analyze_system_logs(
                 results["message"] = "Multiple authentication failures detected."
                 results["status"] = "ALERT"
                 log_event(ALARMS_LOG_FILE, "BRUTEFORCE_DETECTED", summary_msg, ip=source if re.match(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', source) else None)
-                send_alert_email("HIPS Alert: Brute-force Attempt Detected", summary_msg)
+                username = None
+                for line in info["attempts"]:
+                    username_match = re.search(r"user=([\w\d_.-]+)", line)
+                    if username_match:
+                        username = username_match.group(1)
+                        break
+                if username:
+                    await change_user_password(username, "Too many authentication failures")
         if auth_summary:
             results["detections"].insert(0, {"summary": auth_summary, "type": "auth_bruteforce_summary"})
 
