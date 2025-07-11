@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth import get_current_user
 from app.models import User
 from app.utils import send_alert_email, log_event, ALARMS_LOG_FILE
-from app.prevention import change_user_password, block_ip
+from app.prevention import change_user_password
 
 router = APIRouter()
 

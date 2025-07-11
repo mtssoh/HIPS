@@ -53,156 +53,151 @@ async def get_mail_queue_size(
             detail=f"Unexpected error checking mail queue: {str(e)}"
         )
 
-@router.get("/high_memory_processes")
-async def get_high_memory_processes(
-    threshold_percent: float = 10.0,
+@router.get("/processes_check")
+async def monitor_memory_intensive_processes(
+    threshold: float = 10.0,
     current_user: User = Depends(get_current_user)
 ):
-    results = {
+    response = {
         "processes": [],
-        "message": "Process monitoring complete.",
-        "status": "OK"
+        "status": "OK",
+        "message": "Process analysis completed successfully."
     }
 
+    ignored_names = {"postgres", "python3", "sshd", "docker", "nginx"}
+
     try:
-        total_memory_mb = psutil.virtual_memory().total / (1024 * 1024)
+        total_mem = psutil.virtual_memory().total / 1024**2  # MB
 
-        for proc in psutil.process_iter(['pid', 'name', 'username', 'memory_info', 'cpu_percent']):
+        for process in psutil.process_iter(['pid', 'name', 'username', 'memory_info', 'cpu_percent']):
             try:
-                rss_mb = proc.memory_info().rss / (1024 * 1024)
-                percentage = (rss_mb / total_memory_mb) * 100
+                name = process.info['name']
+                if name in ignored_names:
+                    continue
 
-                if percentage > threshold_percent:
-                    cpu_percent_val = proc.cpu_percent(interval=0.01)
+                mem_used = process.memory_info().rss / 1024**2  # MB
+                usage_percent = (mem_used / total_mem) * 100
 
-                    proc_info = {
-                        "pid": proc.info['pid'],
-                        "name": proc.info['name'],
-                        "user": proc.info['username'],
-                        "memory_percent": round(percentage, 2),
-                        "memory_mb": round(rss_mb, 2),
-                        "cpu_percent": round(cpu_percent_val, 2),
-                        "killed": False  # agregado
+                if usage_percent > threshold:
+                    cpu = process.cpu_percent(interval=0.01)
+
+                    entry = {
+                        "pid": process.info['pid'],
+                        "name": name,
+                        "user": process.info['username'],
+                        "memory_percent": round(usage_percent, 2),
+                        "memory_mb": round(mem_used, 2),
+                        "cpu_percent": round(cpu, 2),
+                        "killed": False
                     }
 
-                    # Acción preventiva
-                    alert_msg = f"High memory usage: Process '{proc_info['name']}' (PID: {proc_info['pid']}) using {proc_info['memory_percent']}% RAM."
-                    log_event(ALARMS_LOG_FILE, "HIGH_MEM_PROCESS", alert_msg)
-                    send_alert_email("HIPS Alert: High Memory Usage", alert_msg)
+                    warning = f"Process '{name}' (PID {entry['pid']}) exceeding RAM usage: {entry['memory_percent']}%"
+                    log_event(ALARMS_LOG_FILE, "HIGH_MEM_PROCESS", warning)
+                    send_alert_email("HIPS Alert: High RAM Usage", warning)
 
-                    killed = await kill_process_by_pid(proc_info["pid"], "HIGH_MEM_PROCESS")
-                    proc_info["killed"] = killed
+                    entry["killed"] = await kill_process_by_pid(entry["pid"], "HIGH_MEM_PROCESS")
+                    response["processes"].append(entry)
 
-                    results["processes"].append(proc_info)
-
-                    if results["status"] != "ALERT":
-                        results["status"] = "ALERT"
-                        results["message"] = "Processes with high memory consumption detected!"
+                    if response["status"] != "ALERT":
+                        response["status"] = "ALERT"
+                        response["message"] = "Processes over memory threshold were detected."
 
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
 
-        results["processes"].sort(key=lambda x: x['memory_percent'], reverse=True)
+        response["processes"].sort(key=lambda p: p["memory_percent"], reverse=True)
 
-    except Exception as e:
-        results["status"] = "ERROR"
-        results["message"] = f"Unexpected error monitoring processes: {str(e)}"
-        log_event(ALARMS_LOG_FILE, "UNEXPECTED_ERROR", f"Error monitoring processes: {str(e)}")
+    except Exception as error:
+        response["status"] = "ERROR"
+        response["message"] = f"Error while checking processes: {error}"
+        log_event(ALARMS_LOG_FILE, "PROCESS_MONITOR_ERROR", response["message"])
 
-    return results
+    return response
 
-@router.get("/check_tmp")
-async def check_tmp_directory(
-    current_user: User = Depends(get_current_user)
-):
-    results = {
+@router.get("/tmp_check")
+async def inspect_tmp_contents(current_user: User = Depends(get_current_user)):
+    tmp_dir = "/tmp"
+    summary = {
         "tmp_files": [],
-        "message": "TMP directory check complete.",
-        "status": "OK"
+        "status": "OK",
+        "message": "Inspection of /tmp completed."
     }
-    tmp_path = "/tmp"
-    
-    if not os.path.isdir(tmp_path):
-        results["status"] = "ERROR"
-        results["message"] = f"Directory {tmp_path} not found."
-        log_event(ALARMS_LOG_FILE, "TMP_ERROR", f"TMP directory {tmp_path} not found.")
-        return results
+
+    if not os.path.isdir(tmp_dir):
+        error_msg = f"{tmp_dir} not found."
+        summary.update({"status": "ERROR", "message": error_msg})
+        log_event(ALARMS_LOG_FILE, "TMP_ERROR", error_msg)
+        return summary
+
+    suspicious_pattern = re.compile(r'^\.|\.sh$|\.py$|\.pl$|\.php$|backdoor|shell|reverse|nc\.exe|mimikatz', re.IGNORECASE)
 
     try:
-        # Busca archivos sospechosos por extensión, nombres comunes de scripts, etc.
-        suspicious_names_regex = re.compile(r'^\.|\.sh$|\.py$|\.pl$|\.php$|backdoor|shell|reverse|nc\.exe|mimikatz', re.IGNORECASE)
+        for filename in os.listdir(tmp_dir):
+            filepath = os.path.join(tmp_dir, filename)
+            file_kind = (
+                "symlink" if os.path.islink(filepath) else
+                "file" if os.path.isfile(filepath) else
+                "directory" if os.path.isdir(filepath) else
+                "unknown"
+            )
 
-        for entry in os.listdir(tmp_path):
-            full_path = os.path.join(tmp_path, entry)
-            if os.path.islink(full_path):
-                file_type = "symlink"
-            elif os.path.isfile(full_path):
-                file_type = "file"
-            elif os.path.isdir(full_path):
-                file_type = "directory"
-            else:
-                file_type = "unknown"
+            flagged = False
+            note = "Clean"
 
-            is_suspicious = False
-            message = "OK"
+            if os.path.isfile(filepath):
+                if suspicious_pattern.search(filename):
+                    flagged = True
+                    note = "Name or extension is suspicious."
 
-            if os.path.isfile(full_path):
-                # Check for suspicious names or extensions
-                if suspicious_names_regex.search(entry):
-                    is_suspicious = True
-                    message = "Suspicious name/extension detected."
-                
-                # Check if it's executable
-                if os.access(full_path, os.X_OK):
-                    is_suspicious = True
-                    message = f"{message} Executable file." if is_suspicious else "Executable file."
+                if os.access(filepath, os.X_OK):
+                    flagged = True
+                    note += " Executable file."
 
-            # Check if any running process is using this file from /tmp
-            processes_using_file = []
+            involved_pids = []
             for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'exe']):
                 try:
-                    if proc.info['exe'] == full_path:
-                        processes_using_file.append(f"PID {proc.info['pid']} ({proc.info['name']})")
-                    elif proc.info['cmdline'] and full_path in " ".join(proc.info['cmdline']):
-                        processes_using_file.append(f"PID {proc.info['pid']} ({proc.info['name']}) (cmdline)")
+                    if proc.info['exe'] == filepath or (proc.info['cmdline'] and filepath in " ".join(proc.info['cmdline'])):
+                        involved_pids.append(f"PID {proc.pid} ({proc.info['name']})")
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    pass
+                    continue
 
-            if is_suspicious or processes_using_file:
-                status_entry = "ALERT"
-                results["status"] = "ALERT"
-                if not message:  # Si no se estableció un mensaje previo
-                    message = "Suspicious activity detected in /tmp."
-                if processes_using_file:
-                    message = f"{message} Used by processes: {', '.join(processes_using_file)}"
-                
-                log_event(ALARMS_LOG_FILE, "TMP_SUSPICIOUS", f"Suspicious file/activity in {full_path}: {message}")
-                send_alert_email("HIPS Alert: Suspicious /tmp Activity", f"Suspicious activity detected in /tmp: {full_path}. Details: {message}")
-                
-                for proc_str in processes_using_file:
-                    match = re.search(r'PID (\d+)', proc_str)
-                    if match:
-                        pid = int(match.group(1))
-                        await kill_process_by_pid(pid, f"Suspicious /tmp file used: {entry}")
+            if flagged or involved_pids:
+                summary["status"] = "ALERT"
+                if involved_pids:
+                    note += f" Linked to: {', '.join(involved_pids)}"
 
+                log_event(ALARMS_LOG_FILE, "TMP_SUSPICIOUS", f"{filepath}: {note}")
+                send_alert_email("HIPS Alert: Suspicious File in /tmp", f"{filepath}\n{note}")
+
+                for proc_str in involved_pids:
+                    pid_match = re.search(r'PID (\d+)', proc_str)
+                    if pid_match:
+                        pid = int(pid_match.group(1))
+                        await kill_process_by_pid(pid, f"Flagged file in /tmp: {filename}")
+                try:
+                    os.remove(filepath)
+                except Exception as e:
+                    log_event(ALARMS_LOG_FILE, "TMP_DELETE_ERROR", f"Could not remove {filepath}: {e}")
+
+                entry_status = "ALERT"
             else:
-                status_entry = "OK"
+                entry_status = "OK"
 
-            results["tmp_files"].append({
-                "name": entry,
-                "path": full_path,
-                "type": file_type,
-                "is_suspicious": is_suspicious,
-                "message": message,
-                "status": status_entry
+            summary["tmp_files"].append({
+                "name": filename,
+                "path": filepath,
+                "type": file_kind,
+                "is_suspicious": flagged,
+                "message": note,
+                "status": entry_status
             })
-            
-    except Exception as e:
-        results["status"] = "ERROR"
-        results["message"] = f"Error checking /tmp directory: {str(e)}"
-        log_event(ALARMS_LOG_FILE, "TMP_ERROR", f"Error checking /tmp: {str(e)}")
 
-    return results
+    except Exception as e:
+        summary["status"] = "ERROR"
+        summary["message"] = f"Problem scanning /tmp: {e}"
+        log_event(ALARMS_LOG_FILE, "TMP_SCAN_ERROR", summary["message"])
+
+    return summary
 
 @router.get("/check_cron_jobs")
 async def check_cron_jobs(
@@ -214,15 +209,15 @@ async def check_cron_jobs(
         "status": "OK"
     }
 
-    # Ubicaciones comunes de archivos cron
+   
     cron_files = [
         "/etc/crontab",
-        "/etc/cron.d/",  # Directorio
-        "/etc/cron.hourly/", # Directorio
-        "/etc/cron.daily/",  # Directorio
-        "/etc/cron.weekly/", # Directorio
-        "/etc/cron.monthly/",# Directorio
-        "/var/spool/cron/crontabs/" # Directorio para crontabs de usuario
+        "/etc/cron.d/",  
+        "/etc/cron.hourly/", 
+        "/etc/cron.daily/",  
+        "/etc/cron.weekly/", 
+        "/etc/cron.monthly/",
+        "/var/spool/cron/crontabs/" 
     ]
 
     suspicious_patterns = re.compile(r'wget|curl|nc|bash -i|/dev/(tcp|udp)|base64|xxd|systemctl|chattr|chmod \+s|chmod 777', re.IGNORECASE)

@@ -96,8 +96,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.scanSystemFiles = () => fetchAndDisplay('/scan/system_files', 'scan-spinner');
     window.checkConnectedUsers = () => fetchAndDisplay('/system/connected_users', 'users-spinner');
     window.detectSniffers = () => fetchAndDisplay('/system/detect_sniffers', 'sniffers-spinner');
-    window.checkMemoryUsage = () => fetchAndDisplay('/system/high_memory_processes?threshold_percent=6.0', 'memory-spinner');
-    window.checkTmpDirectory = () => fetchAndDisplay('/system/check_tmp', 'tmp-spinner');
+    window.checkMemoryUsage = () => fetchAndDisplay('/system/processes_check?threshold_percent=6.0', 'memory-spinner');
+    window.checkTmpDirectory = () => fetchAndDisplay('/system/tmp_check', 'tmp-spinner');
     window.checkCronJobs = () => fetchAndDisplay('/system/check_cron_jobs', 'cron-spinner');
 
     window.analyzeLogs = (logType) => {
@@ -168,7 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${data.status || 'OK'}
                         </span>
                     </h5>
-                    <div class="json-display">${JSON.stringify(data, null, 2)}</div>
+                   <div class="json-display"><pre>${JSON.stringify(data, null, 2)}</pre></div>
                 </div>
             </div>
         `;

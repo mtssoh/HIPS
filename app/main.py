@@ -41,44 +41,63 @@ app.include_router(log_router, prefix="/system", tags=["Log Analysis"])
 app.include_router(process_router, prefix="/system", tags=["Process Monitoring"])
 app.include_router(ddos_router, prefix="/system", tags=["DDoS Analysis"])
 
-# --- Startup and Shutdown Events ---
+
+CRITICAL_FILES = [
+    "/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow",
+    "/etc/sudoers", "/etc/hosts", "/etc/resolv.conf", "/etc/crontab", "/etc/rc.local",
+
+    "/bin/bash", "/bin/sh", "/bin/su", "/usr/bin/sudo", "/usr/bin/passwd",
+    "/bin/ls", "/bin/cp", "/bin/mv", "/bin/rm", "/bin/mkdir", "/bin/chmod", "/bin/chown",
+    "/bin/kill", "/usr/bin/top", "/usr/bin/ps", "/usr/bin/w", "/usr/bin/who", "/usr/bin/uptime", "/usr/bin/killall",
+
+    "/sbin/ifconfig", "/usr/bin/ssh", "/usr/bin/scp", "/usr/bin/curl", "/usr/bin/wget", "/usr/bin/nc", "/usr/bin/nmap",
+    "/sbin/init", "/sbin/systemctl", "/bin/systemd", "/usr/sbin/cron", "/usr/sbin/sshd",
+
+    "/usr/bin/python", "/usr/bin/python3", "/usr/bin/perl", "/usr/bin/php", "/usr/bin/ruby",
+    "/bin/tar", "/usr/bin/zip", "/usr/bin/unzip", "/usr/bin/gzip", "/usr/bin/bzip2", "/usr/bin/xz",
+
+    "/sbin/mount", "/sbin/umount", "/sbin/fdisk", "/sbin/parted",
+
+    "/usr/bin/strace", "/usr/bin/lsof", "/usr/bin/netstat", "/usr/bin/tcpdump", "/usr/bin/journalctl"
+]
+
 @app.on_event("startup")
 def on_startup():
+    
     create_db_and_tables()
-    # Asegúrate de que el directorio de logs exista al inicio
+
     os.makedirs(HIPS_LOG_DIR, exist_ok=True)
 
     with Session(engine) as session:
-        # Crear usuario admin si no existe
+     
         if not session.query(User).filter(User.username == "admin").first():
             admin_user = User(username="admin", password_hash=get_password_hash("adminpass"))
             session.add(admin_user)
             session.commit()
             print("Admin user created.")
             log_event(ALARMS_LOG_FILE, "SYSTEM_INIT", "Admin user 'admin' created with default password.")
-        
-        # Set an initial baseline for /etc/passwd and /etc/shadow if it doesn't exist
-        passwd_path = "/etc/passwd"
-        shadow_path = "/etc/shadow"
 
-        for file_path in [passwd_path, shadow_path]:
-            if not session.query(FileBaseline).filter(FileBaseline.file_path == file_path).first():
-                try:
-                    with open(file_path, "rb") as f:
-                        file_hash = hashlib.sha256(f.read()).hexdigest()
-                    session.add(FileBaseline(file_path=file_path, baseline_hash=file_hash))
-                    session.commit()
-                    print(f"Initial baseline for {file_path} created.")
-                    log_event(ALARMS_LOG_FILE, "BASELINE_INIT", f"Initial baseline set for {file_path}.")
-                except FileNotFoundError:
-                    print(f"Warning: Could not establish baseline for {file_path} (file not found).")
-                    log_event(ALARMS_LOG_FILE, "BASELINE_ERROR", f"File not found for baseline: {file_path}.")
-                except PermissionError:
-                    print(f"Warning: Insufficient permissions to read {file_path} for baseline.")
-                    log_event(ALARMS_LOG_FILE, "BASELINE_ERROR", f"Permission denied to read {file_path} for baseline. Run with appropriate permissions.")
-                except Exception as e:
-                    print(f"Error establishing initial baseline for {file_path}: {e}")
-                    log_event(ALARMS_LOG_FILE, "BASELINE_ERROR", f"Error setting baseline for {file_path}: {e}.")
+     
+        for file_path in CRITICAL_FILES:
+            if session.query(FileBaseline).filter(FileBaseline.file_path == file_path).first():
+                continue  
+
+            try:
+                with open(file_path, "rb") as f:
+                    file_hash = hashlib.sha256(f.read()).hexdigest()
+                session.add(FileBaseline(file_path=file_path, baseline_hash=file_hash))
+                session.commit()
+                print(f"Baseline created for {file_path}")
+                log_event(ALARMS_LOG_FILE, "BASELINE_INIT", f"Initial baseline set for {file_path}.")
+            except FileNotFoundError:
+                print(f" {file_path} not found.")
+                log_event(ALARMS_LOG_FILE, "BASELINE_ERROR", f"File not found for baseline: {file_path}.")
+            except PermissionError:
+                print(f"  Permission denied to read {file_path}.")
+                log_event(ALARMS_LOG_FILE, "BASELINE_ERROR", f"Permission denied for {file_path}.")
+            except Exception as e:
+                print(f"  Error reading {file_path}: {e}")
+                log_event(ALARMS_LOG_FILE, "BASELINE_ERROR", f"Error reading {file_path}: {e}")
 
 if __name__ == "__main__":
     import uvicorn
