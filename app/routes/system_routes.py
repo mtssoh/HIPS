@@ -30,62 +30,69 @@ CRITICAL_FILES = [
     "/usr/bin/strace", "/usr/bin/lsof", "/usr/bin/netstat", "/usr/bin/tcpdump", "/usr/bin/journalctl"
 ]
 
-@router.get("/system_files")
-async def scan_system_files(
+@router.get("/binaries_check")
+async def verify_critical_files(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    results = []
+    report = []
 
-    for file_path in CRITICAL_FILES:
+    for path in CRITICAL_FILES:
         try:
-            with open(file_path, "rb") as f:
-                current_hash = hashlib.sha256(f.read()).hexdigest()
+            with open(path, "rb") as file_data:
+                checksum = hashlib.sha256(file_data.read()).hexdigest()
 
-            baseline = session.query(FileBaseline).filter(FileBaseline.file_path == file_path).first()
+            reference = session.query(FileBaseline).filter(FileBaseline.file_path == path).first()
 
-            if baseline:
-                if current_hash == baseline.baseline_hash:
-                    results.append({
-                        "file": file_path,
+            if reference:
+                if checksum == reference.baseline_hash:
+                    report.append({
+                        "file": path,
                         "status": "OK",
-                        "message": "No changes detected."
+                        "message": "Integrity verified."
                     })
                 else:
-                    message = f"CHANGE DETECTED: Current hash: {current_hash}, Baseline hash: {baseline.baseline_hash}"
-                    results.append({
-                        "file": file_path,
-                        "status": "CHANGE DETECTED",
-                        "message": message
+                    diff_msg = (
+                        f"Hash mismatch: current = {checksum}, expected = {reference.baseline_hash}"
+                    )
+                    report.append({
+                        "file": path,
+                        "status": "MODIFIED",
+                        "message": diff_msg
                     })
-                    log_event(ALARMS_LOG_FILE, "FILE_CHANGE", message)
-                    send_alert_email("HIPS Alert: System File Modified!",
-                                     f"File {file_path} has been modified.\n{message}")
+                    log_event(ALARMS_LOG_FILE, "FILE_CHANGE", f"{path}: {diff_msg}")
+                    send_alert_email(
+                        "HIPS Alert: File Integrity Breach",
+                        f"The file {path} has been altered.\n\nDetails:\n{diff_msg}"
+                    )
             else:
-                message = "File has no registered baseline. Consider creating one."
-                results.append({
-                    "file": file_path,
-                    "status": "NO BASELINE",
-                    "message": message
+                warn_msg = "No baseline hash recorded for this file."
+                report.append({
+                    "file": path,
+                    "status": "MISSING_BASELINE",
+                    "message": warn_msg
                 })
-                log_event(ALARMS_LOG_FILE, "NO_BASELINE", f"No baseline for {file_path}. {message}")
+                log_event(ALARMS_LOG_FILE, "NO_BASELINE", f"{path}: {warn_msg}")
 
         except FileNotFoundError:
-            message = "File not found or insufficient permissions."
-            results.append({
-                "file": file_path,
+            error_msg = "File not accessible or missing."
+            report.append({
+                "file": path,
                 "status": "ERROR",
-                "message": message
+                "message": error_msg
             })
-            log_event(ALARMS_LOG_FILE, "FILE_SCAN_ERROR", f"{file_path}: {message}")
+            log_event(ALARMS_LOG_FILE, "FILE_SCAN_ERROR", f"{path}: {error_msg}")
 
-        except Exception as e:
-            message = f"Error processing: {str(e)}"
-            results.append({
-                "file": file_path,
+        except Exception as ex:
+            exception_msg = f"Unexpected exception: {str(ex)}"
+            report.append({
+                "file": path,
                 "status": "ERROR",
-                "message": message
+                "message": exception_msg
             })
-            log_event(ALARMS_LOG_FILE, "FILE_SCAN_ERROR", f"{file_path}: {str(e)}")
+            log_event(ALARMS_LOG_FILE, "FILE_SCAN_ERROR", f"{path}: {exception_msg}")
 
-    return {"user": current_user.username, "scan_results": results}
+    return {
+        "user": current_user.username,
+        "scan_results": report
+    }

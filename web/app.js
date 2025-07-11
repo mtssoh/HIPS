@@ -93,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Global functions for buttons
-    window.scanSystemFiles = () => fetchAndDisplay('/scan/system_files', 'scan-spinner');
+    window.scanSystemFiles = () => fetchAndDisplay('/scan/binaries_check', 'scan-spinner');
     window.checkConnectedUsers = () => fetchAndDisplay('/system/connected_users', 'users-spinner');
     window.detectSniffers = () => fetchAndDisplay('/system/detect_sniffers', 'sniffers-spinner');
     window.checkMemoryUsage = () => fetchAndDisplay('/system/processes_check?threshold_percent=6.0', 'memory-spinner');
