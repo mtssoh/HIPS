@@ -13,44 +13,52 @@ from app.prevention import kill_process_by_pid
 router = APIRouter()
 
 @router.get("/mail_queue_size")
-async def get_mail_queue_size(
-    current_user: User = Depends(get_current_user)
-):
+async def cola_correo(current_user: User = Depends(get_current_user)):
+    ruta = "/usr/bin/mailq"
     try:
-        # --- Obtener ruta absoluta del comando mailq ---
-        mailq_path = "/usr/bin/mailq" 
+        resultado = subprocess.run([ruta], capture_output=True, text=True)
+        salida = resultado.stdout.strip()
         
-        # Intenta 'mailq' (Postfix/Sendmail)
-        result = subprocess.run([mailq_path], capture_output=True, text=True, check=False)
-        output = result.stdout.strip()
-        
-        # Si mailq no encontró mensajes o el comando falló
-        if not output or "empty" in output.lower() or "mail queue is empty" in output.lower() or result.returncode != 0:
-            return {"queue_size": 0, "message": "Mail queue is empty or size could not be determined using mailq.", "user": current_user.username}
-        
-        # Si mailq sí retornó algo útil
-        lines = output.splitlines()
-        # Filtra líneas de cabecera/pie de página para contar mensajes reales
-        queue_count = sum(1 for line in lines if not any(kw in line.lower() for kw in ["mail queue is", "queue id", "total requests", "queue is empty.", "size", "requests"]))
-        
-        if queue_count > 0:
-            log_event(ALARMS_LOG_FILE, "MAIL_QUEUE_ALERT", f"Postfix mail queue size: {queue_count}")
-            send_alert_email("HIPS Alert: Mail Queue Growing", f"The Postfix mail queue has {queue_count} items. This may indicate an issue or mass sending.")
-            return {"queue_size": queue_count, "message": f"Items in mail queue (mailq): {queue_count}", "user": current_user.username}
-        
-        return {"queue_size": 0, "message": "Mail queue is empty or size could not be determined.", "user": current_user.username}
+        if resultado.returncode != 0 or not salida or "empty" in salida.lower():
+            return {
+                "cantidad": 0,
+                "mensaje": "No hay correos en cola o no se pudo obtener la información.",
+                "usuario": current_user.username
+            }
 
-    except FileNotFoundError as e:
-        log_event(ALARMS_LOG_FILE, "CMD_NOT_FOUND", f"Mail command not found: {e.filename}. Ensure your Mail Transfer Agent (MTA) is installed and accessible.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Command '{e.filename}' not found. Ensure your Mail Transfer Agent (MTA) is installed and accessible (e.g., Postfix which uses 'mailq')."
+        fragmentos = salida.split("\n")
+        cantidad_en_cola = sum(
+            1 for fragmento in fragmentos
+            if not any(x in fragmento.lower() for x in ["mail queue is", "queue id", "total requests", "queue is empty.", "size", "requests"])
         )
-    except Exception as e:
-        log_event(ALARMS_LOG_FILE, "UNEXPECTED_ERROR", f"Unexpected error checking mail queue: {str(e)}")
+
+        if cantidad_en_cola > 0:
+            aviso = f"Se detectaron {cantidad_en_cola} elementos en la cola de correos."
+            log_event(ALARMS_LOG_FILE, "COLA_CORREO", aviso)
+            send_alert_email("Alerta HIPS: Cola de correo activa", aviso)
+            return {
+                "cantidad": cantidad_en_cola,
+                "mensaje": aviso,
+                "usuario": current_user.username
+            }
+
+        return {
+            "cantidad": 0,
+            "mensaje": "Cola vacía o no accesible.",
+            "usuario": current_user.username
+        }
+
+    except FileNotFoundError as err:
+        log_event(ALARMS_LOG_FILE, "FALTA_COMANDO", f"No se encontró: {err.filename}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error checking mail queue: {str(e)}"
+            status_code=500,
+            detail=f"No se localizó el ejecutable '{err.filename}'. Verificá que el MTA esté instalado (ej. Postfix)."
+        )
+    except Exception as ex:
+        log_event(ALARMS_LOG_FILE, "FALLO_DESCONOCIDO", f"Error al revisar la cola: {str(ex)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al revisar la cola de correos: {str(ex)}"
         )
 
 @router.get("/processes_check")

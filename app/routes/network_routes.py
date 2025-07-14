@@ -92,73 +92,70 @@ async def get_connected_users(
         )
 
 @router.get("/detect_sniffers")
-async def detect_sniffers(
-    current_user: User = Depends(get_current_user)
-):
-    detection_results = {
-        "promiscuous_mode": [],
-        "known_sniffers": [],
-        "message": "Analysis complete.",
-        "status": "OK"
+async def sniffer_scan(current_user: User = Depends(get_current_user)):
+    outcome = {
+        "interfaces_flagged": [],
+        "processes_flagged": [],
+        "status": "OK",
+        "summary": "Inspección completada."
     }
 
-    # 1. Promiscuous mode detection
     try:
-        promisc_output = subprocess.run(["ip", "-s", "link"], capture_output=True, text=True, check=False)
-        lines = promisc_output.stdout.splitlines()
-        
-        current_interface = None
-        for line in lines:
-            if re.match(r'^\d+:\s+(\S+):', line):
-                current_interface = re.match(r'^\d+:\s+(\S+):', line).group(1)
-            if "PROMISC" in line and current_interface:
-                msg = f"Interface '{current_interface}' is in promiscuous mode."
-                detection_results["promiscuous_mode"].append(msg)
-                detection_results["status"] = "ALERT"
-                detection_results["message"] = "Promiscuous mode detected on one or more interfaces!"
-                log_event(ALARMS_LOG_FILE, "PROMISC_MODE", msg)
-                send_alert_email("HIPS Alert: Promiscuous Mode Detected", msg)
-                current_interface = None 
-                
-    except Exception as e:
-        msg = f"Error checking promiscuous mode: {str(e)}"
-        detection_results["promiscuous_mode"].append(msg)
-        detection_results["status"] = "ERROR"
-        detection_results["message"] = "Error checking promiscuous mode."
-        log_event(ALARMS_LOG_FILE, "ERROR_SNIFFER_DETECTION", msg)
+        prom_output = subprocess.run(["ip", "-s", "link"], capture_output=True, text=True)
+        entries = prom_output.stdout.splitlines()
+        iface = None
 
-    # 2. Detection of known sniffing tools
-    known_sniffers_keywords = [
-        "tcpdump", "wireshark", "tshark", "nmap", "netcat",
-        "dumpcap", "ettercap", "ngrep", "snort", "zeek",
-        "dsniff", "arpspoof", "ssldump", "pktmon"
+        for l in entries:
+            match = re.search(r'^(\d+):\s+(\S+):', l)
+            if match:
+                iface = match.group(2)
+            elif iface and "PROMISC" in l:
+                alert_text = f"'{iface}' con modo promiscuo activo."
+                outcome["interfaces_flagged"].append(alert_text)
+                outcome["status"] = "ALERTA"
+                outcome["summary"] = "Modo promiscuo identificado en al menos una interfaz."
+                log_event(ALARMS_LOG_FILE, "PROMISC_INTERFACE", alert_text)
+                send_alert_email("Alerta HIPS: Interfaz en modo promiscuo", alert_text)
+                iface = None
+
+    except Exception as problem:
+        err_msg = f"Fallo al evaluar interfaces: {problem}"
+        outcome["interfaces_flagged"].append(err_msg)
+        outcome["status"] = "ERROR"
+        outcome["summary"] = "No se pudo verificar interfaces de red."
+        log_event(ALARMS_LOG_FILE, "INTERFACE_CHECK_FAIL", err_msg)
+
+    watchlist = [
+        "wireshark", "tshark", "tcpdump", "snort", "zeek", "nmap", "dumpcap",
+        "ngrep", "netcat", "ettercap", "ssldump", "dsniff", "pktmon", "arpspoof"
     ]
 
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'username']):
+    active = psutil.process_iter(["pid", "name", "cmdline", "username"])
+    for task in active:
         try:
-            cmdline = " ".join(proc.info['cmdline']) if proc.info['cmdline'] else proc.info['name']
-            
-            for keyword in known_sniffers_keywords:
-                if keyword in cmdline.lower():
-                    proc_info = {
-                        "pid": proc.info['pid'],
-                        "name": proc.info['name'],
-                        "cmdline": cmdline,
-                        "user": proc.info['username']
+            details = task.info.get("cmdline", []) or [task.info.get("name", "")]
+            line = " ".join(details).lower()
+
+            for pattern in watchlist:
+                if pattern in line:
+                    found = {
+                        "pid": task.info["pid"],
+                        "exec": task.info["name"],
+                        "cmd": line,
+                        "owner": task.info["username"]
                     }
-                    detection_results["known_sniffers"].append(proc_info)
-                    if detection_results["status"] != "ALERT":
-                        detection_results["status"] = "ALERT"
-                        detection_results["message"] = "Known sniffing tools detected running!"
-                    
-                    msg = f"Known sniffer detected: {proc.info['name']} (PID: {proc.info['pid']}, User: {proc.info['username']})"
-                    log_event(ALARMS_LOG_FILE, "SNIFFER_DETECTED", msg)
-                    send_alert_email("HIPS Alert: Sniffer Tool Detected", msg)
+                    outcome["processes_flagged"].append(found)
+                    if outcome["status"] != "ALERTA":
+                        outcome["status"] = "ALERTA"
+                        outcome["summary"] = "Actividad sospechosa detectada: herramientas de análisis presentes."
+                    logtext = f"Herramienta sospechosa activa: {found['exec']} (PID {found['pid']}, usuario {found['owner']})"
+                    log_event(ALARMS_LOG_FILE, "TOOL_DETECTED", logtext)
+                    send_alert_email("Alerta HIPS: Herramienta de red detectada", logtext)
                     break
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
+        except Exception:
+            continue
 
-    if detection_results["status"] == "ALERT":
-        detection_results["message"] = "Security warning: Possible threats detected!"
+    if outcome["status"] == "ALERTA":
+        outcome["summary"] = "Se identificaron posibles amenazas en el sistema."
 
-    return {"detection_results": detection_results, "user": current_user.username}
+    return {"resultado": outcome, "usuario": current_user.username}
