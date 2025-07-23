@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dashboardContainer.classList.remove('hidden');
             
             // Iniciar escaneo automático después del login
-            startAutoScan();
+            // startAutoScan();
         } catch (error) {
             alert('Login failed: ' + error.message);
         }
@@ -99,6 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.checkMemoryUsage = () => fetchAndDisplay('/system/processes_check?threshold_percent=6.0', 'memory-spinner');
     window.checkTmpDirectory = () => fetchAndDisplay('/system/tmp_check', 'tmp-spinner');
     window.checkCronJobs = () => fetchAndDisplay('/system/check_cron_jobs', 'cron-spinner');
+    window.checkMailQueue = () => fetchAndDisplay('/system/mail_queue_size', 'mailq-spinner');
+
 
     window.analyzeLogs = (logType) => {
         fetchAndDisplay(`/system/analyze_logs?log_type=${logType}`, null);
@@ -211,12 +213,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Función para iniciar el escaneo automático
     function startAutoScan() {
         // Ejecutar inmediatamente al iniciar
-        runAllScans();
+        // runAllScans();
         
         // Programar ejecución cada 5 minutos (300000 ms)
-        window.autoScanInterval = setInterval(() => {
-            runAllScans();
-        }, 300000); // 5 minutos
+        // window.autoScanInterval = setInterval(() => {
+        //    runAllScans();
+        //}, 300000); // 5 minutos
         
         console.log('Escaneo automático iniciado - cada 5 minutos');
     }

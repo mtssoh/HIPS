@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,39 +12,48 @@
             background-color: #f8f9fa;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
+
         .dashboard-card {
             border: none;
             border-radius: 15px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             transition: transform 0.2s;
         }
+
         .dashboard-card:hover {
             transform: translateY(-5px);
         }
+
         .status-ok {
             color: #28a745;
         }
+
         .status-alert {
             color: #dc3545;
         }
+
         .status-warning {
             color: #ffc107;
         }
+
         .navbar-brand {
             font-weight: bold;
             color: #007bff !important;
         }
+
         .spinner-border-sm {
             width: 1rem;
             height: 1rem;
         }
+
         .result-card {
             background: white;
             border-radius: 10px;
             padding: 20px;
             margin: 10px 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
+
         .json-display {
             background: #f8f9fa;
             border: 1px solid #dee2e6;
@@ -54,15 +64,18 @@
             max-height: 300px;
             overflow-y: auto;
         }
+
         .login-container {
             max-width: 400px;
             margin: 50px auto;
         }
+
         .hidden {
             display: none;
         }
     </style>
 </head>
+
 <body>
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
@@ -115,7 +128,8 @@
                         <h5 class="card-title">
                             <i class="fas fa-chart-line"></i> Sistema Overview
                             <span class="badge bg-info ms-2" id="auto-scan-status">Escaneo automático: Activo</span>
-                            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleAutoScan()" id="toggle-auto-scan">
+                            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="toggleAutoScan()"
+                                id="toggle-auto-scan">
                                 <i class="fas fa-pause"></i> Pausar
                             </button>
                         </h5>
@@ -260,6 +274,15 @@
                                     <i class="fas fa-envelope"></i> Mail Logs
                                 </button>
                             </div>
+                            <br>
+                            <div class="col-md-4">
+                                <button class="btn btn-outline-danger btn-sm w-100" onclick="checkMailQueue()">
+                                    <i class="fas fa-paper-plane"></i> Cola de Correos
+                                    <span class="spinner-border spinner-border-sm hidden ms-2"
+                                        id="mailq-spinner"></span>
+                                </button>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -276,7 +299,8 @@
                         </h5>
                         <div class="row">
                             <div class="col-md-8">
-                                <input type="text" class="form-control" id="ddos-log-path" placeholder="Enter log file path (e.g., /var/log/ddos.log)">
+                                <input type="text" class="form-control" id="ddos-log-path"
+                                    placeholder="Enter log file path (e.g., /var/log/ddos.log)">
                             </div>
                             <div class="col-md-4">
                                 <button class="btn btn-danger btn-sm w-100" onclick="analyzeDDoSLog()">
@@ -299,4 +323,5 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="app.js"></script>
 </body>
+
 </html>
