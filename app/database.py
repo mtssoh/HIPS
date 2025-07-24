@@ -8,7 +8,7 @@ load_dotenv()
 # Configuración de la base de datos
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL is not configured in the .env file")
+    raise ValueError("DB URL NOT CONFIGURED")
 
 engine = create_engine(DATABASE_URL)
 

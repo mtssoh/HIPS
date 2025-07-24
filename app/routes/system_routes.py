@@ -11,7 +11,7 @@ import os
 
 router = APIRouter()
 
-CRITICAL_FILES = [
+ARCHIVOS_CRITICOS = [
     "/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow",
     "/etc/sudoers", "/etc/hosts", "/etc/resolv.conf", "/etc/crontab", "/etc/rc.local",
 
@@ -31,68 +31,66 @@ CRITICAL_FILES = [
 ]
 
 @router.get("/binaries_check")
-async def verify_critical_files(
+async def verificar_archivos_criticos(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session)
 ):
-    report = []
+    reporte = []
 
-    for path in CRITICAL_FILES:
+    for ruta in ARCHIVOS_CRITICOS:
         try:
-            with open(path, "rb") as file_data:
-                checksum = hashlib.sha256(file_data.read()).hexdigest()
+            with open(ruta, "rb") as archivo:
+                hash_actual = hashlib.sha256(archivo.read()).hexdigest()
 
-            reference = session.query(FileBaseline).filter(FileBaseline.file_path == path).first()
+            referencia = session.query(FileBaseline).filter(FileBaseline.file_path == ruta).first()
 
-            if reference:
-                if checksum == reference.baseline_hash:
-                    report.append({
-                        "file": path,
-                        "status": "OK",
-                        "message": "Integrity verified."
+            if referencia:
+                if hash_actual == referencia.baseline_hash:
+                    reporte.append({
+                        "archivo": ruta,
+                        "estado": "OK",
+                        "mensaje": "Integridad verificada."
                     })
                 else:
-                    diff_msg = (
-                        f"Hash mismatch: current = {checksum}, expected = {reference.baseline_hash}"
-                    )
-                    report.append({
-                        "file": path,
-                        "status": "MODIFIED",
-                        "message": diff_msg
+                    detalle = f"Diferencia de hash: actual = {hash_actual}, esperado = {referencia.baseline_hash}"
+                    reporte.append({
+                        "archivo": ruta,
+                        "estado": "MODIFICADO",
+                        "mensaje": detalle
                     })
-                    log_event(ALARMS_LOG_FILE, "FILE_CHANGE", f"{path}: {diff_msg}")
+                    log_event(ALARMS_LOG_FILE, "CAMBIO_ARCHIVO", f"{ruta}: {detalle}")
                     send_alert_email(
-                        "HIPS Alert: File Integrity Breach",
-                        f"The file {path} has been altered.\n\nDetails:\n{diff_msg}"
+                        "Alerta HIPS: Alteración de archivo crítico",
+                        f"El archivo {ruta} fue modificado.\n\nDetalles:\n{detalle}"
                     )
             else:
-                warn_msg = "No baseline hash recorded for this file."
-                report.append({
-                    "file": path,
-                    "status": "MISSING_BASELINE",
-                    "message": warn_msg
+                mensaje = "No existe un hash de referencia para este archivo."
+                reporte.append({
+                    "archivo": ruta,
+                    "estado": "SIN_REFERENCIA",
+                    "mensaje": mensaje
                 })
-                log_event(ALARMS_LOG_FILE, "NO_BASELINE", f"{path}: {warn_msg}")
+                log_event(ALARMS_LOG_FILE, "SIN_HASH_REFERENCIA", f"{ruta}: {mensaje}")
 
         except FileNotFoundError:
-            error_msg = "File not accessible or missing."
-            report.append({
-                "file": path,
-                "status": "ERROR",
-                "message": error_msg
+            mensaje_error = "Archivo inaccesible o inexistente."
+            reporte.append({
+                "archivo": ruta,
+                "estado": "ERROR",
+                "mensaje": mensaje_error
             })
-            log_event(ALARMS_LOG_FILE, "FILE_SCAN_ERROR", f"{path}: {error_msg}")
+            log_event(ALARMS_LOG_FILE, "ERROR_LECTURA_ARCHIVO", f"{ruta}: {mensaje_error}")
 
         except Exception as ex:
-            exception_msg = f"Unexpected exception: {str(ex)}"
-            report.append({
-                "file": path,
-                "status": "ERROR",
-                "message": exception_msg
+            mensaje_excepcion = f"Excepción inesperada: {str(ex)}"
+            reporte.append({
+                "archivo": ruta,
+                "estado": "ERROR",
+                "mensaje": mensaje_excepcion
             })
-            log_event(ALARMS_LOG_FILE, "FILE_SCAN_ERROR", f"{path}: {exception_msg}")
+            log_event(ALARMS_LOG_FILE, "ERROR_LECTURA_ARCHIVO", f"{ruta}: {mensaje_excepcion}")
 
     return {
-        "user": current_user.username,
-        "scan_results": report
+        "usuario": current_user.username,
+        "resultado_escaneo": reporte
     }

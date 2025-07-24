@@ -21,18 +21,17 @@ def log_event(log_file: str, event_type: str, message: str, ip: Optional[str] = 
     """Registra un evento en el archivo de log especificado."""
     timestamp = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M:%S")
     log_entry = f"{timestamp} :: {event_type} :: {ip if ip else 'N/A'} :: {message}\n"
-    
-    # Asegúrate de que el directorio de logs exista
+
     os.makedirs(HIPS_LOG_DIR, exist_ok=True)
-    
+
     with open(log_file, "a") as f:
         f.write(log_entry)
-    print(f"Logged to {log_file}: {log_entry.strip()}")
+    print(f"[LOG] Evento registrado en {log_file}: {log_entry.strip()}")
 
 def send_alert_email(subject: str, body: str):
-    """Envía un correo electrónico al administrador."""
+    """Envía un correo electrónico de alerta al administrador."""
     if not all([ALERT_EMAIL_SENDER, ALERT_EMAIL_RECEIVER, SMTP_SERVER]):
-        print("Warning: Email alert not configured. Missing SENDER, RECEIVER or SMTP_SERVER env vars.")
+        print("[ADVERTENCIA] Alerta por correo no configurada. Faltan variables de entorno: SENDER, RECEIVER o SMTP_SERVER.")
         return
 
     msg = MIMEMultipart()
@@ -43,12 +42,14 @@ def send_alert_email(subject: str, body: str):
 
     try:
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()  # Usar TLS (seguridad)
+            server.starttls()
             if ALERT_EMAIL_PASSWORD:
                 server.login(ALERT_EMAIL_SENDER, ALERT_EMAIL_PASSWORD)
             server.send_message(msg)
-        print(f"Alert email sent to {ALERT_EMAIL_RECEIVER} with subject: {subject}")
-        log_event(ALARMS_LOG_FILE, "EMAIL_SENT", f"Email alert sent: {subject}")
+
+        print(f"[CORREO] Alerta enviada a {ALERT_EMAIL_RECEIVER} con asunto: {subject}")
+        log_event(ALARMS_LOG_FILE, "CORREO_ENVIADO", f"Alerta enviada por correo: {subject}")
+
     except Exception as e:
-        print(f"Error sending email alert: {e}")
-        log_event(ALARMS_LOG_FILE, "EMAIL_ERROR", f"Failed to send email alert: {e}")
+        print(f"[ERROR] No se pudo enviar la alerta por correo: {e}")
+        log_event(ALARMS_LOG_FILE, "ERROR_CORREO", f"No se pudo enviar la alerta por correo: {e}")

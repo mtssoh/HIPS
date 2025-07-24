@@ -10,6 +10,7 @@ from app.auth import get_current_user
 from app.models import User
 from app.utils import send_alert_email, log_event, ALARMS_LOG_FILE
 from app.prevention import kill_process_by_pid
+
 router = APIRouter()
 
 @router.get("/mail_queue_size")
@@ -18,7 +19,7 @@ async def cola_correo(current_user: User = Depends(get_current_user)):
     try:
         resultado = subprocess.run([ruta], capture_output=True, text=True)
         salida = resultado.stdout.strip()
-        
+
         if resultado.returncode != 0 or not salida or "empty" in salida.lower():
             return {
                 "cantidad": 0,
@@ -61,270 +62,270 @@ async def cola_correo(current_user: User = Depends(get_current_user)):
             detail=f"Error al revisar la cola de correos: {str(ex)}"
         )
 
+
 @router.get("/processes_check")
-async def monitor_memory_intensive_processes(
+async def monitor_memoria(
     threshold: float = 10.0,
     current_user: User = Depends(get_current_user)
 ):
-    response = {
-        "processes": [],
-        "status": "OK",
-        "message": "Process analysis completed successfully."
+    respuesta = {
+        "procesos": [],
+        "estado": "OK",
+        "mensaje": "Análisis de procesos completado exitosamente."
     }
 
-    ignored_names = {"postgres", "python3", "sshd", "docker", "nginx"}
+    ignorar = {"postgres", "python3", "sshd", "docker", "nginx"}
 
     try:
-        total_mem = psutil.virtual_memory().total / 1024**2  # MB
+        total_mem = psutil.virtual_memory().total / 1024**2
 
-        for process in psutil.process_iter(['pid', 'name', 'username', 'memory_info', 'cpu_percent']):
+        for proc in psutil.process_iter(['pid', 'name', 'username', 'memory_info', 'cpu_percent']):
             try:
-                name = process.info['name']
-                if name in ignored_names:
+                nombre = proc.info['name']
+                if nombre in ignorar:
                     continue
 
-                mem_used = process.memory_info().rss / 1024**2  # MB
-                usage_percent = (mem_used / total_mem) * 100
+                mem_usada = proc.memory_info().rss / 1024**2
+                porcentaje = (mem_usada / total_mem) * 100
 
-                if usage_percent > threshold:
-                    cpu = process.cpu_percent(interval=0.01)
+                if porcentaje > threshold:
+                    cpu = proc.cpu_percent(interval=0.01)
 
-                    entry = {
-                        "pid": process.info['pid'],
-                        "name": name,
-                        "user": process.info['username'],
-                        "memory_percent": round(usage_percent, 2),
-                        "memory_mb": round(mem_used, 2),
-                        "cpu_percent": round(cpu, 2),
-                        "killed": False
+                    entrada = {
+                        "pid": proc.info['pid'],
+                        "nombre": nombre,
+                        "usuario": proc.info['username'],
+                        "memoria_porcentaje": round(porcentaje, 2),
+                        "memoria_mb": round(mem_usada, 2),
+                        "cpu_porcentaje": round(cpu, 2),
+                        "terminado": False
                     }
 
-                    warning = f"Process '{name}' (PID {entry['pid']}) exceeding RAM usage: {entry['memory_percent']}%"
-                    log_event(ALARMS_LOG_FILE, "HIGH_MEM_PROCESS", warning)
-                    send_alert_email("HIPS Alert: High RAM Usage", warning)
+                    aviso = f"Proceso '{nombre}' (PID {entrada['pid']}) excede el uso de RAM: {entrada['memoria_porcentaje']}%"
+                    log_event(ALARMS_LOG_FILE, "PROCESO_RAM_ALTA", aviso)
+                    send_alert_email("Alerta HIPS: Consumo alto de RAM", aviso)
 
-                    entry["killed"] = await kill_process_by_pid(entry["pid"], "HIGH_MEM_PROCESS")
-                    response["processes"].append(entry)
+                    entrada["terminado"] = await kill_process_by_pid(entrada["pid"], "PROCESO_RAM_ALTA")
+                    respuesta["procesos"].append(entrada)
 
-                    if response["status"] != "ALERT":
-                        response["status"] = "ALERT"
-                        response["message"] = "Processes over memory threshold were detected."
+                    if respuesta["estado"] != "ALERTA":
+                        respuesta["estado"] = "ALERTA"
+                        respuesta["mensaje"] = "Se detectaron procesos que superan el umbral de memoria."
 
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
 
-        response["processes"].sort(key=lambda p: p["memory_percent"], reverse=True)
+        respuesta["procesos"].sort(key=lambda p: p["memoria_porcentaje"], reverse=True)
 
     except Exception as error:
-        response["status"] = "ERROR"
-        response["message"] = f"Error while checking processes: {error}"
-        log_event(ALARMS_LOG_FILE, "PROCESS_MONITOR_ERROR", response["message"])
+        respuesta["estado"] = "ERROR"
+        respuesta["mensaje"] = f"Error al verificar procesos: {error}"
+        log_event(ALARMS_LOG_FILE, "ERROR_PROCESOS", respuesta["mensaje"])
 
-    return response
+    return respuesta
+
 
 @router.get("/tmp_check")
-async def inspect_tmp_contents(current_user: User = Depends(get_current_user)):
+async def verificar_tmp(current_user: User = Depends(get_current_user)):
     tmp_dir = "/tmp"
-    summary = {
-        "tmp_files": [],
-        "status": "OK",
-        "message": "Inspection of /tmp completed."
+    resumen = {
+        "archivos_tmp": [],
+        "estado": "OK",
+        "mensaje": "Inspección de /tmp completada."
     }
 
     if not os.path.isdir(tmp_dir):
-        error_msg = f"{tmp_dir} not found."
-        summary.update({"status": "ERROR", "message": error_msg})
-        log_event(ALARMS_LOG_FILE, "TMP_ERROR", error_msg)
-        return summary
+        mensaje = f"No se encontró el directorio {tmp_dir}."
+        resumen.update({"estado": "ERROR", "mensaje": mensaje})
+        log_event(ALARMS_LOG_FILE, "TMP_ERROR", mensaje)
+        return resumen
 
-    suspicious_pattern = re.compile(r'^\.|\.sh$|\.py$|\.pl$|\.php$|backdoor|shell|reverse|nc\.exe|mimikatz', re.IGNORECASE)
+    patron_sospechoso = re.compile(r'^\.|\.sh$|\.py$|\.pl$|\.php$|backdoor|shell|reverse|nc\.exe|mimikatz', re.IGNORECASE)
 
     try:
-        for filename in os.listdir(tmp_dir):
-            filepath = os.path.join(tmp_dir, filename)
-            file_kind = (
-                "symlink" if os.path.islink(filepath) else
-                "file" if os.path.isfile(filepath) else
-                "directory" if os.path.isdir(filepath) else
-                "unknown"
+        for archivo in os.listdir(tmp_dir):
+            ruta = os.path.join(tmp_dir, archivo)
+            tipo = (
+                "enlace simbólico" if os.path.islink(ruta) else
+                "archivo" if os.path.isfile(ruta) else
+                "directorio" if os.path.isdir(ruta) else
+                "desconocido"
             )
 
-            flagged = False
-            note = "Clean"
+            sospechoso = False
+            nota = "Limpio"
 
-            if os.path.isfile(filepath):
-                if suspicious_pattern.search(filename):
-                    flagged = True
-                    note = "Name or extension is suspicious."
+            if os.path.isfile(ruta):
+                if patron_sospechoso.search(archivo):
+                    sospechoso = True
+                    nota = "Nombre o extensión sospechosa."
 
-                if os.access(filepath, os.X_OK):
-                    flagged = True
-                    note += " Executable file."
+                if os.access(ruta, os.X_OK):
+                    sospechoso = True
+                    nota += " Archivo ejecutable."
 
-            involved_pids = []
+            procesos_relacionados = []
             for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'exe']):
                 try:
-                    if proc.info['exe'] == filepath or (proc.info['cmdline'] and filepath in " ".join(proc.info['cmdline'])):
-                        involved_pids.append(f"PID {proc.pid} ({proc.info['name']})")
+                    if proc.info['exe'] == ruta or (proc.info['cmdline'] and ruta in " ".join(proc.info['cmdline'])):
+                        procesos_relacionados.append(f"PID {proc.pid} ({proc.info['name']})")
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
 
-            if flagged or involved_pids:
-                summary["status"] = "ALERT"
-                if involved_pids:
-                    note += f" Linked to: {', '.join(involved_pids)}"
+            if sospechoso or procesos_relacionados:
+                resumen["estado"] = "ALERTA"
+                if procesos_relacionados:
+                    nota += f" Relacionado a: {', '.join(procesos_relacionados)}"
 
-                log_event(ALARMS_LOG_FILE, "TMP_SUSPICIOUS", f"{filepath}: {note}")
-                send_alert_email("HIPS Alert: Suspicious File in /tmp", f"{filepath}\n{note}")
+                log_event(ALARMS_LOG_FILE, "TMP_SOSPECHOSO", f"{ruta}: {nota}")
+                send_alert_email("Alerta HIPS: Archivo sospechoso en /tmp", f"{ruta}\n{nota}")
 
-                for proc_str in involved_pids:
-                    pid_match = re.search(r'PID (\d+)', proc_str)
+                for pid_texto in procesos_relacionados:
+                    pid_match = re.search(r'PID (\d+)', pid_texto)
                     if pid_match:
                         pid = int(pid_match.group(1))
-                        await kill_process_by_pid(pid, f"Flagged file in /tmp: {filename}")
+                        await kill_process_by_pid(pid, f"Archivo marcado en /tmp: {archivo}")
                 try:
-                    os.remove(filepath)
+                    os.remove(ruta)
                 except Exception as e:
-                    log_event(ALARMS_LOG_FILE, "TMP_DELETE_ERROR", f"Could not remove {filepath}: {e}")
+                    log_event(ALARMS_LOG_FILE, "TMP_DELETE_ERROR", f"No se pudo eliminar {ruta}: {e}")
 
-                entry_status = "ALERT"
+                estado_archivo = "ALERTA"
             else:
-                entry_status = "OK"
+                estado_archivo = "OK"
 
-            summary["tmp_files"].append({
-                "name": filename,
-                "path": filepath,
-                "type": file_kind,
-                "is_suspicious": flagged,
-                "message": note,
-                "status": entry_status
+            resumen["archivos_tmp"].append({
+                "nombre": archivo,
+                "ruta": ruta,
+                "tipo": tipo,
+                "sospechoso": sospechoso,
+                "mensaje": nota,
+                "estado": estado_archivo
             })
 
     except Exception as e:
-        summary["status"] = "ERROR"
-        summary["message"] = f"Problem scanning /tmp: {e}"
-        log_event(ALARMS_LOG_FILE, "TMP_SCAN_ERROR", summary["message"])
+        resumen["estado"] = "ERROR"
+        resumen["mensaje"] = f"Problema al escanear /tmp: {e}"
+        log_event(ALARMS_LOG_FILE, "TMP_SCAN_ERROR", resumen["mensaje"])
 
-    return summary
+    return resumen
+
 
 @router.get("/check_cron_jobs")
-async def check_cron_jobs(
-    current_user: User = Depends(get_current_user)
-):
-    results = {
-        "cron_jobs": [],
-        "message": "Cron job check complete.",
-        "status": "OK"
+async def verificar_cron(current_user: User = Depends(get_current_user)):
+    resultados = {
+        "tareas_cron": [],
+        "mensaje": "Verificación de cron completada.",
+        "estado": "OK"
     }
 
-   
-    cron_files = [
+    rutas = [
         "/etc/crontab",
-        "/etc/cron.d/",  
-        "/etc/cron.hourly/", 
-        "/etc/cron.daily/",  
-        "/etc/cron.weekly/", 
+        "/etc/cron.d/",
+        "/etc/cron.hourly/",
+        "/etc/cron.daily/",
+        "/etc/cron.weekly/",
         "/etc/cron.monthly/",
-        "/var/spool/cron/crontabs/" 
+        "/var/spool/cron/crontabs/"
     ]
 
-    suspicious_patterns = re.compile(r'wget|curl|nc|bash -i|/dev/(tcp|udp)|base64|xxd|systemctl|chattr|chmod \+s|chmod 777', re.IGNORECASE)
+    patron = re.compile(r'wget|curl|nc|bash -i|/dev/(tcp|udp)|base64|xxd|systemctl|chattr|chmod \+s|chmod 777', re.IGNORECASE)
 
-    for path in cron_files:
+    for path in rutas:
         if os.path.isdir(path):
             try:
-                for filename in os.listdir(path):
-                    full_path = os.path.join(path, filename)
-                    if os.path.isfile(full_path):
-                        process_cron_file(full_path, results, suspicious_patterns)
+                for archivo in os.listdir(path):
+                    ruta_completa = os.path.join(path, archivo)
+                    if os.path.isfile(ruta_completa):
+                        procesar_cron(ruta_completa, resultados, patron)
             except PermissionError:
-                msg = f"Permission denied to read cron directory: {path}"
-                results["cron_jobs"].append({"path": path, "status": "ERROR", "message": msg})
+                msg = f"Permiso denegado al leer el directorio cron: {path}"
+                resultados["tareas_cron"].append({"ruta": path, "estado": "ERROR", "mensaje": msg})
                 log_event(ALARMS_LOG_FILE, "CRON_ERROR", msg)
             except Exception as e:
-                msg = f"Error listing cron directory {path}: {str(e)}"
-                results["cron_jobs"].append({"path": path, "status": "ERROR", "message": msg})
+                msg = f"Error al listar cron {path}: {str(e)}"
+                resultados["tareas_cron"].append({"ruta": path, "estado": "ERROR", "mensaje": msg})
                 log_event(ALARMS_LOG_FILE, "CRON_ERROR", msg)
         elif os.path.isfile(path):
-            process_cron_file(path, results, suspicious_patterns)
+            procesar_cron(path, resultados, patron)
 
-    if results["status"] == "ALERT":
-        results["message"] = "Suspicious cron jobs detected!"
-    
-    return results
+    if resultados["estado"] == "ALERTA":
+        resultados["mensaje"] = "¡Se detectaron tareas cron sospechosas!"
 
-def process_cron_file(file_path, results_dict, suspicious_patterns):
-    """Helper function to read and analyze a single cron file."""
+    return resultados
+
+
+def procesar_cron(ruta, resultados, patron):
     try:
-        with open(file_path, 'r') as f:
-            content = f.read()
-            suspicious_matches = suspicious_patterns.findall(content)
-            
-            if suspicious_matches:
-                results_dict["status"] = "ALERT"
-                msg = f"Suspicious patterns found in {file_path}: {', '.join(set(suspicious_matches))}"
-                results_dict["cron_jobs"].append({
-                    "path": file_path,
-                    "status": "ALERT",
-                    "message": msg,
-                    "content_preview": content[:200] + "..." if len(content) > 200 else content
+        with open(ruta, 'r') as f:
+            contenido = f.read()
+            hallazgos = patron.findall(contenido)
+
+            if hallazgos:
+                resultados["estado"] = "ALERTA"
+                resumen = f"Patrones sospechosos en {ruta}: {', '.join(set(hallazgos))}"
+                resultados["tareas_cron"].append({
+                    "ruta": ruta,
+                    "estado": "ALERTA",
+                    "mensaje": resumen,
+                    "contenido": contenido[:200] + "..." if len(contenido) > 200 else contenido
                 })
-                log_event(ALARMS_LOG_FILE, "CRON_SUSPICIOUS", msg)
-                send_alert_email("HIPS Alert: Suspicious Cron Job", msg)
+                log_event(ALARMS_LOG_FILE, "CRON_SOSPECHOSO", resumen)
+                send_alert_email("Alerta HIPS: Cron sospechoso", resumen)
             else:
-                results_dict["cron_jobs"].append({
-                    "path": file_path,
-                    "status": "OK",
-                    "message": "No suspicious patterns detected.",
-                    "content_preview": content[:200] + "..." if len(content) > 200 else content
+                resultados["tareas_cron"].append({
+                    "ruta": ruta,
+                    "estado": "OK",
+                    "mensaje": "Sin patrones sospechosos.",
+                    "contenido": contenido[:200] + "..." if len(contenido) > 200 else contenido
                 })
     except FileNotFoundError:
-        msg = f"Cron file not found: {file_path}"
-        results_dict["cron_jobs"].append({"path": file_path, "status": "ERROR", "message": msg})
+        msg = f"No se encontró el archivo cron: {ruta}"
+        resultados["tareas_cron"].append({"ruta": ruta, "estado": "ERROR", "mensaje": msg})
         log_event(ALARMS_LOG_FILE, "CRON_ERROR", msg)
     except PermissionError:
-        msg = f"Permission denied to read cron file: {file_path}"
-        results_dict["cron_jobs"].append({"path": file_path, "status": "ERROR", "message": msg})
+        msg = f"Permiso denegado al leer el archivo cron: {ruta}"
+        resultados["tareas_cron"].append({"ruta": ruta, "estado": "ERROR", "mensaje": msg})
         log_event(ALARMS_LOG_FILE, "CRON_ERROR", msg)
     except Exception as e:
-        msg = f"Error reading cron file {file_path}: {str(e)}"
-        results_dict["cron_jobs"].append({"path": file_path, "status": "ERROR", "message": msg})
+        msg = f"Error al leer el archivo cron {ruta}: {str(e)}"
+        resultados["tareas_cron"].append({"ruta": ruta, "estado": "ERROR", "mensaje": msg})
         log_event(ALARMS_LOG_FILE, "CRON_ERROR", msg)
 
+
 @router.get("/invalid_login_attempts")
-async def get_invalid_login_attempts(
-    time_window_minutes: int = 5,  # Ventana de tiempo para agrupar intentos
-    max_attempts_per_ip: int = 5,  # Umbral de intentos fallidos por IP
+async def intentos_invalidos(
+    ventana_minutos: int = 5,
+    max_por_ip: int = 5,
     current_user: User = Depends(get_current_user)
 ):
-    results = {
-        "summary": [],
-        "detailed_attempts": [],
-        "message": "Analysis complete.",
-        "status": "OK"
+    resultado = {
+        "resumen": [],
+        "intentos_detallados": [],
+        "mensaje": "Análisis completado.",
+        "estado": "OK"
     }
 
-    # Simulación de datos (reemplazar con datos reales de log)
-    simulated_failed_logins = {
-        "192.168.1.10": {"count": 7, "timestamps": [datetime.now() - timedelta(minutes=i) for i in range(7)]},
-        "10.0.0.5": {"count": 3, "timestamps": [datetime.now() - timedelta(minutes=i) for i in range(3)]},
-        "1.2.3.4": {"count": 6, "timestamps": [datetime.now() - timedelta(minutes=i) for i in range(6)]},
+    simulados = {
+        "192.168.1.10": {"conteo": 7, "timestamps": [datetime.now() - timedelta(minutes=i) for i in range(7)]},
+        "10.0.0.5": {"conteo": 3, "timestamps": [datetime.now() - timedelta(minutes=i) for i in range(3)]},
+        "1.2.3.4": {"conteo": 6, "timestamps": [datetime.now() - timedelta(minutes=i) for i in range(6)]},
     }
-    
-    current_time = datetime.now(timezone.utc)
-    
-    for ip, data in simulated_failed_logins.items():
-        recent_attempts = [ts for ts in data["timestamps"] if (current_time - ts).total_seconds() / 60 <= time_window_minutes]
-        
-        if len(recent_attempts) >= max_attempts_per_ip:
-            summary_msg = f"Suspicious activity: IP {ip} has {len(recent_attempts)} failed login attempts in the last {time_window_minutes} minutes."
-            results["summary"].append(summary_msg)
-            results["status"] = "ALERT"
-            results["message"] = "Multiple failed login attempts detected!"
-            log_event(ALARMS_LOG_FILE, "MULTIPLE_FAILED_LOGINS", summary_msg, ip=ip)
-            send_alert_email("HIPS Alert: Multiple Failed Logins", summary_msg)
 
-    if not results["summary"]:
-        results["message"] = "No unusual login attempt patterns detected."
-    
-    return results
+    ahora = datetime.now(timezone.utc)
+
+    for ip, data in simulados.items():
+        recientes = [ts for ts in data["timestamps"] if (ahora - ts).total_seconds() / 60 <= ventana_minutos]
+
+        if len(recientes) >= max_por_ip:
+            resumen = f"Actividad sospechosa: La IP {ip} realizó {len(recientes)} intentos fallidos en los últimos {ventana_minutos} minutos."
+            resultado["resumen"].append(resumen)
+            resultado["estado"] = "ALERTA"
+            resultado["mensaje"] = "¡Se detectaron múltiples intentos de acceso fallidos!"
+            log_event(ALARMS_LOG_FILE, "INTENTOS_FALLIDOS", resumen, ip=ip)
+            send_alert_email("Alerta HIPS: Múltiples accesos fallidos", resumen)
+
+    if not resultado["resumen"]:
+        resultado["mensaje"] = "No se detectaron patrones anómalos de acceso."
+
+    return resultado

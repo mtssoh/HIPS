@@ -19,22 +19,21 @@ async def analyze_ddos_log(
     if not log_file_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="log_file_path is required in request body"
+            detail="Se requiere 'log_file_path' en el cuerpo de la solicitud."
         )
     
     results = {
-        "log_path": log_file_path,
-        "detections": [],
-        "message": "DDoS log analysis complete.",
-        "status": "OK"
+        "ruta_log": log_file_path,
+        "detecciones": [],
+        "mensaje": "Análisis de DDoS completado",
+        "estado": "OK"
     }
 
     if not os.path.exists(log_file_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"DDoS log file not found at {log_file_path}"
+            detail=f"No se encontró el archivo de log en la ruta: {log_file_path}"
         )
-    
     
     ddos_patterns = [
         re.compile(r"client (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})#\d+: query: .*\s(NXDOMAIN|\d+\squeries from client)"), 
@@ -49,34 +48,44 @@ async def analyze_ddos_log(
                 for pattern in ddos_patterns:
                     match = pattern.search(line)
                     if match:
-                        ip = match.group(1) if len(match.groups()) >=1 else "N/A"
-                        
+                        ip = match.group(1) if len(match.groups()) >= 1 else "N/A"
                         if ip != "N/A":
                             ip_counts[ip] = ip_counts.get(ip, 0) + 1
                         
-                        results["detections"].append({"line": line.strip(), "ip": ip, "pattern": pattern.pattern})
-                        break 
+                        results["detecciones"].append({
+                            "linea": line.strip(),
+                            "ip": ip,
+                            "patron": pattern.pattern
+                        })
+                        break  # No buscar múltiples patrones en una misma línea
 
-       
         for ip, count in ip_counts.items():
             if count >= 50: 
-                alert_msg = f"Possible DDoS activity: IP {ip} generated {count} suspicious DNS queries."
-                results["detections"].insert(0, {"summary": alert_msg, "ip": ip, "type": "ddos_ip_summary"})
-                results["status"] = "ALERT"
-                results["message"] = "Possible DDoS attack detected!"
-                log_event(ALARMS_LOG_FILE, "DDOS_DETECTED", alert_msg, ip=ip)
-                send_alert_email("HIPS Alert: Possible DDoS Attack", alert_msg)
-                await block_ip(ip, "Banned due to Possible DDoS Attack")
-                
+                mensaje_alerta = f"Posible actividad DDoS: la IP {ip} generó {count} consultas sospechosas."
+                results["detecciones"].insert(0, {
+                    "resumen": mensaje_alerta,
+                    "ip": ip,
+                    "tipo": "resumen_ddos_ip"
+                })
+                results["estado"] = "ALERTA"
+                results["mensaje"] = "Posible actividad DDoS detectada"
+
+                log_event(ALARMS_LOG_FILE, "DDOS_DETECTADO", mensaje_alerta, ip=ip)
+                send_alert_email("ALERTA: Posible ataque DDoS detectado", mensaje_alerta)
+                await block_ip(ip, "IP bloqueada por posible ataque DDoS")
 
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"DDoS log file not found at {log_file_path}"
+            detail=f"No se encontró el archivo de log en la ruta: {log_file_path}"
         )
     except Exception as e:
-        results["status"] = "ERROR"
-        results["message"] = f"Error analyzing DDoS log: {str(e)}"
-        log_event(ALARMS_LOG_FILE, "DDOS_ANALYZE_ERROR", f"Error analyzing DDoS log {log_file_path}: {str(e)}")
+        results["estado"] = "ERROR"
+        results["mensaje"] = f"Error al analizar el log de DDoS: {str(e)}"
+        log_event(
+            ALARMS_LOG_FILE,
+            "ERROR_ANALISIS_DDOS",
+            f"Error al analizar el archivo {log_file_path}: {str(e)}"
+        )
 
     return results

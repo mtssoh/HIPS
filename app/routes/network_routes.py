@@ -25,79 +25,79 @@ async def get_connected_users(
             parts = line.split()
             if len(parts) >= 3:
                 user_info = {
-                    "user": parts[0],
+                    "usuario": parts[0],
                     "tty": parts[1],
-                    "from": parts[2] if parts[2] != "-" else "localhost",
-                    "login_time": " ".join(parts[3:5]) if len(parts) > 4 else "N/A",
-                    "idle": parts[5] if len(parts) > 5 else "N/A",
-                    "jcpu": parts[6] if len(parts) > 6 else "N/A",
-                    "pcpu": parts[7] if len(parts) > 7 else "N/A",
-                    "what": " ".join(parts[8:]) if len(parts) > 8 else "N/A"
+                    "origen": parts[2] if parts[2] != "-" else "localhost",
+                    "hora_ingreso": " ".join(parts[3:5]) if len(parts) > 4 else "N/D",
+                    "inactivo": parts[5] if len(parts) > 5 else "N/D",
+                    "jcpu": parts[6] if len(parts) > 6 else "N/D",
+                    "pcpu": parts[7] if len(parts) > 7 else "N/D",
+                    "comando": " ".join(parts[8:]) if len(parts) > 8 else "N/D"
                 }
                 connected_users.append(user_info)
 
         if not connected_users:
-            return {"message": "No connected users detected (besides the system itself).", "users": []}
+            return {"mensaje": "No se detectaron usuarios conectados (excepto el sistema).", "usuarios": []}
 
         # Detectar usuarios sospechosos
         known_local = {"localhost", "127.0.0.1", "::1", ":1", os.getenv("KNOWN_LOCAL_IP", "")}
-        suspicious_users = [u for u in connected_users if u["from"] not in known_local and u["from"] != "?"]
+        suspicious_users = [u for u in connected_users if u["origen"] not in known_local and u["origen"] != "?"]
 
         if suspicious_users:
             alert_list = []
             for su in suspicious_users:
-                ip = su["from"]
-                username = su["user"]
-                # Bloquear la IP
+                ip = su["origen"]
+                username = su["usuario"]
                 try:
                     subprocess.run(["sudo", "iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"], check=True)
-                    log_event(ALARMS_LOG_FILE, "IP_BLOCKED", f"Blocked suspicious IP: {ip} (User: {username})")
+                    log_event(ALARMS_LOG_FILE, "IP_BLOQUEADA", f"IP sospechosa bloqueada: {ip} (Usuario: {username})")
                     send_alert_email(
-                        f"HIPS Alert: IP Blocked - {ip}",
-                        f"The IP address {ip} associated with user {username} has been blocked due to suspicious login."
+                        f"Alerta HIPS: IP bloqueada - {ip}",
+                        f"La dirección IP {ip} asociada al usuario {username} fue bloqueada por inicio de sesión sospechoso."
                     )
                 except subprocess.CalledProcessError as e:
-                    log_event(ALARMS_LOG_FILE, "BLOCK_FAILED", f"Failed to block IP {ip}: {e}")
+                    log_event(ALARMS_LOG_FILE, "FALLO_BLOQUEO", f"No se pudo bloquear la IP {ip}: {e}")
                 
-                await change_user_password(username, reason=f"Suspicious login from IP {ip}")
-                alert_list.append(f"{username} from {ip}")
+                await change_user_password(username, reason=f"Inicio de sesión sospechoso desde {ip}")
+                alert_list.append(f"{username} desde {ip}")
 
-            msg = f"Suspicious connected users detected and mitigated: {', '.join(alert_list)}"
-            log_event(ALARMS_LOG_FILE, "SUSPICIOUS_LOGIN", msg)
+            msg = f"Se detectaron y mitigaron usuarios conectados sospechosos: {', '.join(alert_list)}"
+            log_event(ALARMS_LOG_FILE, "LOGIN_SOSPECHOSO", msg)
             return {
-                "connected_users": connected_users,
-                "alert": msg,
-                "status": "ALERT",
-                "user": current_user.username
+                "usuarios_conectados": connected_users,
+                "alerta": msg,
+                "estado": "ALERTA",
+                "usuario": current_user.username
             }
 
         return {
-            "connected_users": connected_users,
-            "message": "No suspicious users found.",
-            "status": "OK",
-            "user": current_user.username
+            "usuarios_conectados": connected_users,
+            "mensaje": "No se encontraron usuarios sospechosos.",
+            "estado": "OK",
+            "usuario": current_user.username
         }
 
     except subprocess.CalledProcessError as e:
-        log_event(ALARMS_LOG_FILE, "CMD_ERROR", f"Error running 'w' command: {e.stderr.strip()}")
+        log_event(ALARMS_LOG_FILE, "ERROR_CMD", f"Error al ejecutar el comando 'w': {e.stderr.strip()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error running 'w' command: {e.stderr.strip()}"
+            detail=f"Error al ejecutar el comando 'w': {e.stderr.strip()}"
         )
     except Exception as e:
-        log_event(ALARMS_LOG_FILE, "UNEXPECTED_ERROR", f"Unexpected error getting connected users: {str(e)}")
+        log_event(ALARMS_LOG_FILE, "ERROR_INESPERADO", f"Error inesperado al obtener usuarios conectados: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error getting connected users: {str(e)}"
+            detail=f"Error inesperado al obtener usuarios conectados: {str(e)}"
         )
+
 
 @router.get("/detect_sniffers")
 async def sniffer_scan(current_user: User = Depends(get_current_user)):
-    outcome = {
-        "interfaces_flagged": [],
-        "processes_flagged": [],
-        "status": "OK",
-        "summary": "Inspección completada."
+    resultado = {
+        "interfaces_detectadas": [],
+        "procesos_detectados": [],
+        "estado": "OK",
+        "resumen": "Inspección completada."
     }
 
     try:
@@ -110,52 +110,52 @@ async def sniffer_scan(current_user: User = Depends(get_current_user)):
             if match:
                 iface = match.group(2)
             elif iface and "PROMISC" in l:
-                alert_text = f"'{iface}' con modo promiscuo activo."
-                outcome["interfaces_flagged"].append(alert_text)
-                outcome["status"] = "ALERTA"
-                outcome["summary"] = "Modo promiscuo identificado en al menos una interfaz."
-                log_event(ALARMS_LOG_FILE, "PROMISC_INTERFACE", alert_text)
-                send_alert_email("Alerta HIPS: Interfaz en modo promiscuo", alert_text)
+                alerta = f"La interfaz '{iface}' tiene el modo promiscuo activo."
+                resultado["interfaces_detectadas"].append(alerta)
+                resultado["estado"] = "ALERTA"
+                resultado["resumen"] = "Se detectó modo promiscuo en al menos una interfaz de red."
+                log_event(ALARMS_LOG_FILE, "INTERFAZ_PROMISCUA", alerta)
+                send_alert_email("Alerta HIPS: Interfaz en modo promiscuo", alerta)
                 iface = None
 
-    except Exception as problem:
-        err_msg = f"Fallo al evaluar interfaces: {problem}"
-        outcome["interfaces_flagged"].append(err_msg)
-        outcome["status"] = "ERROR"
-        outcome["summary"] = "No se pudo verificar interfaces de red."
-        log_event(ALARMS_LOG_FILE, "INTERFACE_CHECK_FAIL", err_msg)
+    except Exception as e:
+        mensaje_error = f"No se pudo evaluar las interfaces de red: {e}"
+        resultado["interfaces_detectadas"].append(mensaje_error)
+        resultado["estado"] = "ERROR"
+        resultado["resumen"] = "Error al verificar interfaces de red."
+        log_event(ALARMS_LOG_FILE, "FALLO_INTERFAZ", mensaje_error)
 
-    watchlist = [
+    herramientas = [
         "wireshark", "tshark", "tcpdump", "snort", "zeek", "nmap", "dumpcap",
         "ngrep", "netcat", "ettercap", "ssldump", "dsniff", "pktmon", "arpspoof"
     ]
 
-    active = psutil.process_iter(["pid", "name", "cmdline", "username"])
-    for task in active:
+    procesos = psutil.process_iter(["pid", "name", "cmdline", "username"])
+    for proc in procesos:
         try:
-            details = task.info.get("cmdline", []) or [task.info.get("name", "")]
-            line = " ".join(details).lower()
+            detalles = proc.info.get("cmdline", []) or [proc.info.get("name", "")]
+            linea = " ".join(detalles).lower()
 
-            for pattern in watchlist:
-                if pattern in line:
-                    found = {
-                        "pid": task.info["pid"],
-                        "exec": task.info["name"],
-                        "cmd": line,
-                        "owner": task.info["username"]
+            for herramienta in herramientas:
+                if herramienta in linea:
+                    detectado = {
+                        "pid": proc.info["pid"],
+                        "ejecutable": proc.info["name"],
+                        "comando": linea,
+                        "usuario": proc.info["username"]
                     }
-                    outcome["processes_flagged"].append(found)
-                    if outcome["status"] != "ALERTA":
-                        outcome["status"] = "ALERTA"
-                        outcome["summary"] = "Actividad sospechosa detectada: herramientas de análisis presentes."
-                    logtext = f"Herramienta sospechosa activa: {found['exec']} (PID {found['pid']}, usuario {found['owner']})"
-                    log_event(ALARMS_LOG_FILE, "TOOL_DETECTED", logtext)
-                    send_alert_email("Alerta HIPS: Herramienta de red detectada", logtext)
+                    resultado["procesos_detectados"].append(detectado)
+                    if resultado["estado"] != "ALERTA":
+                        resultado["estado"] = "ALERTA"
+                        resultado["resumen"] = "Se detectaron herramientas de análisis de red en ejecución."
+                    log = f"Herramienta sospechosa activa: {detectado['ejecutable']} (PID {detectado['pid']}, usuario {detectado['usuario']})"
+                    log_event(ALARMS_LOG_FILE, "HERRAMIENTA_RED_DETECTADA", log)
+                    send_alert_email("Alerta HIPS: Herramienta de red detectada", log)
                     break
         except Exception:
             continue
 
-    if outcome["status"] == "ALERTA":
-        outcome["summary"] = "Se identificaron posibles amenazas en el sistema."
+    if resultado["estado"] == "ALERTA":
+        resultado["resumen"] = "Se identificaron posibles amenazas en el sistema."
 
-    return {"resultado": outcome, "usuario": current_user.username}
+    return {"resultado": resultado, "usuario": current_user.username}
